@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Environment Variables
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data
+data/raw/*
+data/processed/*
+data/uploads/*
+data/*.csv
+data/*.zip
+data/*.parquet
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/uploads/.gitkeep
+
+# Outputs
+outputs/
+mlruns/
+*.log
+
+# MLflow
+mlartifacts/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Redis
+dump.rdb
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary
+*.tmp
+nul
+
+# IDE & Editor
+.cursor/
+
+# Git backup
+.git-backup/
+
+# Development Plans & Notes
+plans/
+stitch_prompts/
+ADDITIONAL_CHANGES.txt
+SESSION_CHANGES.md
+
+# Test Results
+test_result.txt
+test_titanic_output.txt
+phase4_test_log.txt
+
+# Claude Settings (local)
+.claude/settings.local.json
+
+# Data metadata
+data/metadata/
