@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, De
 from typing import List, Optional
 import asyncio
 import json
+import os
 import time
 from pydantic import BaseModel, UUID4
 import uuid
@@ -25,6 +26,9 @@ from app.config import settings
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
 logger = get_logger(__name__)
+
+# Session별 실행 중인 분석 태스크 추적
+_analysis_tasks: dict[str, asyncio.Task] = {}
 
 # 세션 스토어는 요청 시점에 초기화 (Redis 의존성 지연)
 session_store: SessionStore | None = None
@@ -394,11 +398,19 @@ class ConnectionManager:
             del self.active_connections[session_id]
             logger.info("websocket_disconnected", session_id=session_id)
 
+    def is_connected(self, session_id: str) -> bool:
+        """연결 상태 확인"""
+        return session_id in self.active_connections
+
     async def send_message(self, session_id: str, message: dict):
-        """메시지 전송"""
+        """메시지 전송 (연결 끊김 시 조용히 무시)"""
         if session_id in self.active_connections:
-            websocket = self.active_connections[session_id]
-            await websocket.send_json(message)
+            try:
+                websocket = self.active_connections[session_id]
+                await websocket.send_json(message)
+            except Exception:
+                # WebSocket이 끊어진 경우 → 무시 (분석은 계속 진행)
+                pass
 
 
 manager = ConnectionManager()
@@ -483,6 +495,450 @@ def _build_sub_step_label(event_type: str, event_data: dict) -> str:
     return base
 
 
+def _sanitize_for_json(value, path=""):
+    """Non-serializable 값 제거 (module-level)"""
+    drop = object()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value, []
+    if isinstance(value, dict):
+        cleaned = {}
+        removed = []
+        for key, item in value.items():
+            sanitized, removed_child = _sanitize_for_json(
+                item,
+                f"{path}.{key}" if path else str(key),
+            )
+            if sanitized is not drop:
+                cleaned[key] = sanitized
+            else:
+                removed.append(f"{path}.{key}" if path else str(key))
+            removed.extend(removed_child)
+        return cleaned, removed
+    if isinstance(value, list):
+        cleaned_list = []
+        removed = []
+        for idx, item in enumerate(value):
+            sanitized, removed_child = _sanitize_for_json(
+                item,
+                f"{path}[{idx}]",
+            )
+            if sanitized is not drop:
+                cleaned_list.append(sanitized)
+            else:
+                removed.append(f"{path}[{idx}]")
+            removed.extend(removed_child)
+        return cleaned_list, removed
+    return drop, [path]
+
+
+def _to_native_types(obj):
+    """numpy/pandas 타입을 native Python 타입으로 재귀 변환 (JSON 직렬화 보장)"""
+    import numpy as np
+
+    if isinstance(obj, dict):
+        return {str(k): _to_native_types(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_native_types(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.str_,)):
+        return str(obj)
+    return obj
+
+
+def _get_metric_options(problem_type: str) -> list:
+    """문제 유형별 평가 지표 옵션 반환"""
+    if problem_type in ("binary_classification",):
+        return [
+            {"value": "roc_auc", "label": "ROC-AUC", "recommended": True, "reason": "불균형 이진 분류에 최적"},
+            {"value": "f1", "label": "F1 Score", "reason": "정밀도/재현율 조화 평균"},
+            {"value": "accuracy", "label": "Accuracy", "reason": "단순 정확도"},
+        ]
+    elif problem_type in ("multiclass_classification",):
+        return [
+            {"value": "f1_macro", "label": "F1 Macro", "recommended": True, "reason": "클래스별 균형 평가"},
+            {"value": "accuracy", "label": "Accuracy", "reason": "단순 정확도"},
+            {"value": "log_loss", "label": "Log Loss", "reason": "확률 기반 손실"},
+        ]
+    elif problem_type in ("regression",):
+        return [
+            {"value": "rmse", "label": "RMSE", "recommended": True, "reason": "평균 제곱근 오차"},
+            {"value": "mae", "label": "MAE", "reason": "평균 절대 오차"},
+            {"value": "r2", "label": "R²", "reason": "결정계수"},
+        ]
+    else:
+        return [
+            {"value": "accuracy", "label": "Accuracy", "recommended": True},
+        ]
+
+
+async def _build_analysis_questions(session_context: dict) -> dict:
+    """DataProfiler + TypeDetector 실행 → 프로필 요약 + 질문 구성"""
+    file_path = session_context.get("file_path")
+    if not file_path:
+        raise ValueError("No file_path in session context")
+
+    from app.core.data_pipeline.loader import DataLoader
+    from app.core.data_pipeline.profiler import DataProfiler
+    from app.core.data_pipeline.type_detector import TypeDetector
+
+    df, _ = await run_in_threadpool(DataLoader.load_file, file_path)
+
+    profiler = DataProfiler()
+    profile = await run_in_threadpool(profiler.profile, df)
+
+    detector = TypeDetector()
+    detection = await run_in_threadpool(detector.detect, df)
+
+    # Build profile summary
+    overview = profile.get("overview", profile.get("basic_info", {}))
+    variables = profile.get("variables", profile.get("column_types", {}))
+
+    def is_numeric(info):
+        vt = info.get("variable_type") or info.get("type")
+        if vt == "numeric":
+            return True
+        dtype_name = str(info.get("type", ""))
+        return dtype_name.startswith(("int", "float", "uint"))
+
+    def is_categorical(info):
+        vt = info.get("variable_type") or info.get("type")
+        return vt in ("categorical", "object") or str(info.get("type", "")) in ("object", "category", "bool")
+
+    numeric_cols = [c for c, info in variables.items() if is_numeric(info)]
+    categorical_cols = [c for c, info in variables.items() if is_categorical(info)]
+
+    rows = overview.get("n_observations", overview.get("rows", 0))
+    cols = overview.get("n_variables", overview.get("columns", 0))
+    memory_bytes = overview.get("memory_size", overview.get("memory_usage", 0))
+    if isinstance(memory_bytes, str):
+        memory_bytes = 0
+    memory_mb = memory_bytes / (1024 * 1024) if memory_bytes > 1024 else memory_bytes
+
+    # Missing cells
+    missing_info = profile.get("missing", {})
+    total_cells = rows * cols if rows and cols else 1
+    missing_cells = missing_info.get("total_missing", 0) if isinstance(missing_info, dict) else 0
+    if missing_cells == 0:
+        # Fallback: sum from variables
+        for info in variables.values():
+            missing_cells += info.get("missing", info.get("n_missing", 0))
+    missing_pct = (missing_cells / total_cells * 100) if total_cells > 0 else 0
+
+    duplicate_rows = overview.get("n_duplicates", overview.get("duplicate_rows", 0))
+
+    profile_summary = {
+        "rows": rows,
+        "columns": cols,
+        "numericColumns": numeric_cols[:20],
+        "categoricalColumns": categorical_cols[:20],
+        "missingCellsPct": round(missing_pct, 1),
+        "duplicateRows": duplicate_rows,
+        "memoryMB": round(memory_mb, 1),
+    }
+
+    # Build target options from columns
+    recommended_target = detection.get("recommended_target")
+    problem_type = detection.get("problem_type") or detection.get("task_type") or "unknown"
+
+    all_columns = list(df.columns)
+    target_options = []
+    for col in all_columns[:30]:
+        opt = {"value": col, "label": col}
+        if col == recommended_target:
+            opt["recommended"] = True
+            unique_count = df[col].nunique()
+            opt["reason"] = f"고유값 {unique_count}개, 분류 대상으로 적합" if unique_count <= 20 else f"고유값 {unique_count}개"
+        target_options.append(opt)
+
+    # Problem type options
+    problem_type_options = [
+        {"value": "binary_classification", "label": "이진 분류"},
+        {"value": "multiclass_classification", "label": "다중 분류"},
+        {"value": "regression", "label": "회귀"},
+    ]
+    for opt in problem_type_options:
+        if opt["value"] == problem_type:
+            opt["recommended"] = True
+            confidence = detection.get("confidence", 0)
+            try:
+                opt["reason"] = f"자동 감지 신뢰도 {float(confidence):.0%}"
+            except (TypeError, ValueError):
+                pass
+
+    metric_options = _get_metric_options(problem_type)
+
+    questions = [
+        {
+            "id": "target",
+            "type": "select",
+            "label": "타겟 변수 (예측할 컬럼)",
+            "description": "모델이 예측할 대상 컬럼을 선택하세요.",
+            "required": True,
+            "defaultValue": recommended_target or "",
+            "options": target_options,
+        },
+        {
+            "id": "problem_type",
+            "type": "radio",
+            "label": "문제 유형",
+            "description": "데이터 특성을 분석한 결과를 바탕으로 추천합니다.",
+            "required": True,
+            "defaultValue": problem_type,
+            "options": problem_type_options,
+        },
+        {
+            "id": "metric",
+            "type": "radio",
+            "label": "평가 지표",
+            "description": "모델 성능을 측정할 지표를 선택하세요.",
+            "required": True,
+            "defaultValue": metric_options[0]["value"] if metric_options else "accuracy",
+            "options": metric_options,
+        },
+        {
+            "id": "goal",
+            "type": "text",
+            "label": "분석 목표 (선택사항)",
+            "description": "분석의 비즈니스 목표를 간단히 설명해주세요.",
+            "placeholder": "예: 고위험 고객 식별, 매출 예측 등",
+            "required": False,
+        },
+    ]
+
+    return _to_native_types({
+        "profile": profile_summary,
+        "questions": questions,
+        "_detection": detection,  # internal: keep for plan building
+    })
+
+
+def _build_analysis_plan(answers: dict, session_context: dict) -> dict:
+    """사용자 응답 → 분석 계획 요약"""
+    problem_type = answers.get("problem_type", "binary_classification")
+    target = answers.get("target", "target")
+    metric = answers.get("metric", "accuracy")
+    goal = answers.get("goal", "데이터 분석 및 예측 모델 구축")
+    if not goal.strip():
+        goal = "데이터 분석 및 예측 모델 구축"
+
+    type_labels = {
+        "binary_classification": "이진 분류",
+        "multiclass_classification": "다중 분류",
+        "regression": "회귀",
+    }
+
+    return {
+        "analysisGoal": goal,
+        "targetColumn": target,
+        "problemType": problem_type,
+        "evaluationMetric": metric,
+        "constraints": [],
+        "estimatedDuration": "15~30분",
+        "steps": [
+            {"name": "문제 정의", "description": "분석 목표 및 타겟 확인"},
+            {"name": "선행연구", "description": "관련 논문/Kaggle 솔루션 조사"},
+            {"name": "모델 학습", "description": "AutoML(FLAML)로 최적 모델 탐색"},
+            {"name": "인사이트", "description": "SHAP 기반 모델 해석"},
+            {"name": "리포트", "description": "종합 분석 보고서 생성"},
+        ],
+    }
+
+
+def _create_event_handler(session_id: str, accumulated_sub_steps: list, current_phase: dict, sub_step_counter_ref: list):
+    """이벤트 핸들러 팩토리 — Orchestrator 이벤트를 WebSocket status.update로 변환"""
+
+    async def _send_status(payload: dict):
+        payload["subSteps"] = list(accumulated_sub_steps)
+        await manager.send_message(session_id, {
+            "type": "status.update",
+            "payload": payload,
+        })
+
+    def handler(event: dict):
+        event_type = event.get("type", "")
+        event_data = event.get("data", {})
+
+        if event_type == "phase_change":
+            phase = event_data.get("phase")
+            if phase in PHASE_STATUS_MAP:
+                for s in accumulated_sub_steps:
+                    if s["status"] == "running":
+                        s["status"] = "complete"
+                step, step_name = PHASE_STATUS_MAP[phase]
+                current_phase["step"] = step
+                current_phase["step_name"] = step_name
+                current_phase["phase"] = phase
+                return _send_status({
+                    "sessionId": session_id,
+                    "step": step,
+                    "totalSteps": 5,
+                    "stepName": step_name,
+                    "status": "running",
+                    "progress": 0,
+                    "description": PHASE_DESCRIPTIONS.get(phase, ""),
+                })
+        elif event_type in SUB_STEP_DESCRIPTIONS:
+            for s in accumulated_sub_steps:
+                if s["status"] == "running":
+                    s["status"] = "complete"
+            label = _build_sub_step_label(event_type, event_data)
+            sub_step_counter_ref[0] += 1
+            accumulated_sub_steps.append({
+                "id": f"sub-{sub_step_counter_ref[0]}",
+                "label": label,
+                "status": "running",
+                "timestamp": int(time.time() * 1000),
+            })
+            if current_phase["step"] > 0:
+                return _send_status({
+                    "sessionId": session_id,
+                    "step": current_phase["step"],
+                    "totalSteps": 5,
+                    "stepName": current_phase["step_name"],
+                    "status": "running",
+                    "progress": 0,
+                    "description": PHASE_DESCRIPTIONS.get(current_phase["phase"], ""),
+                })
+        return None
+
+    return handler, _send_status
+
+
+async def _run_analysis_background(
+    session_id: str,
+    session_data: dict,
+    session_context: dict,
+):
+    """WebSocket과 독립적으로 분석 실행. 결과는 Redis에 저장."""
+    accumulated_sub_steps: list[dict] = []
+    sub_step_counter_ref = [0]
+    current_phase: dict = {"step": 0, "step_name": "", "phase": ""}
+
+    event_handler, send_status = _create_event_handler(
+        session_id, accumulated_sub_steps, current_phase, sub_step_counter_ref
+    )
+
+    global session_store
+    session_store = session_store or get_session_store()
+
+    try:
+        agent_context = AgentContext(
+            session_id=session_id,
+            user_id=session_data.get("user_id"),
+            data=session_context,
+            history=session_data.get("messages", []),
+            event_handler=event_handler,
+        )
+        agent = OrchestratorAgent(agent_context, llm_provider=None)
+        result = await agent.execute()
+        session_context.update(agent_context.data)
+
+        confirm_msg_id = str(uuid.uuid4())
+
+        if result.success:
+            for s in accumulated_sub_steps:
+                if s["status"] == "running":
+                    s["status"] = "complete"
+            accumulated_sub_steps.append({
+                "id": "sub-final",
+                "label": "전체 분석 파이프라인 완료",
+                "status": "complete",
+                "timestamp": int(time.time() * 1000),
+            })
+            session_context["analysis_state"] = "COMPLETED"
+            await send_status({
+                "sessionId": session_id,
+                "step": 5,
+                "totalSteps": 5,
+                "stepName": "Reporting",
+                "status": "complete",
+                "progress": 100,
+                "description": "분석이 완료되었습니다! 리포트 페이지에서 결과를 확인하세요.",
+            })
+
+            # report.ready event
+            try:
+                report_data = session_context.get("report", {})
+                report_md_path = report_data.get("markdown_report") if isinstance(report_data, dict) else None
+                report_preview = ""
+                if report_md_path and os.path.exists(report_md_path):
+                    with open(report_md_path, "r", encoding="utf-8") as rf:
+                        report_preview = rf.read()[:2000]
+                await manager.send_message(session_id, {
+                    "type": "report.ready",
+                    "payload": {
+                        "sessionId": session_id,
+                        "title": f"분석 리포트 - {session_id[:8]}",
+                        "preview": report_preview,
+                    }
+                })
+            except Exception as rpt_err:
+                logger.warning("report_ready_event_failed", error=str(rpt_err))
+
+            done_text = "전체 분석 워크플로우가 완료되었습니다. 리포트를 확인해주세요."
+        else:
+            for s in accumulated_sub_steps:
+                if s["status"] == "running":
+                    s["status"] = "failed"
+            session_context["analysis_state"] = "FAILED"
+            session_context["analysis_error"] = result.error
+            await send_status({
+                "sessionId": session_id,
+                "step": 5,
+                "totalSteps": 5,
+                "stepName": "Reporting",
+                "status": "failed",
+                "progress": 100,
+                "description": f"분석에 실패했습니다: {result.error}",
+            })
+            done_text = f"분석 워크플로우에 실패했습니다: {result.error}"
+
+        # Send result message (if WebSocket connected)
+        if manager.is_connected(session_id):
+            for i in range(0, len(done_text), 200):
+                await manager.send_message(session_id, {
+                    "type": "message.received",
+                    "payload": {
+                        "sessionId": session_id,
+                        "messageId": confirm_msg_id,
+                        "chunk": done_text[i:i + 200],
+                        "isComplete": False,
+                    }
+                })
+            await manager.send_message(session_id, {
+                "type": "message.complete",
+                "payload": {"sessionId": session_id, "messageId": confirm_msg_id},
+            })
+
+        done_msg = _build_message("assistant", done_text, message_id=confirm_msg_id)
+        session_data["messages"].append(done_msg)
+
+    except asyncio.CancelledError:
+        session_context["analysis_state"] = "CANCELLED"
+        logger.warning("analysis_cancelled", session_id=session_id)
+    except Exception as exc:
+        session_context["analysis_state"] = "FAILED"
+        session_context["analysis_error"] = str(exc)
+        logger.error("analysis_background_error", error=str(exc), session_id=session_id)
+    finally:
+        # Persist to Redis
+        try:
+            sanitized_ctx, _ = _sanitize_for_json(_to_native_types(session_context))
+            session_data["context"] = sanitized_ctx
+            session_data["updated_at"] = datetime.now().isoformat()
+            await run_in_threadpool(session_store.update_session, session_id, session_data)
+        except Exception as save_err:
+            logger.error("analysis_save_failed", error=str(save_err), session_id=session_id)
+        _analysis_tasks.pop(session_id, None)
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
@@ -527,24 +983,29 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session_context = session_data.get("context", {}) or {}
         analysis_state = session_context.get("analysis_state")
         if analysis_state == "COMPLETED":
-            # 채팅 히스토리에 이미 완료 메시지가 있으므로 status.update 불요
             logger.info("session_state_restored", session_id=session_id, state="COMPLETED")
         elif analysis_state == "RUNNING":
-            # 분석 진행 중이었으나 연결 끊김 → 실패로 간주
-            session_context["analysis_state"] = "FAILED"
-            await websocket.send_json({
-                "type": "status.update",
-                "payload": {
-                    "sessionId": session_id,
-                    "step": 0,
-                    "totalSteps": 5,
-                    "stepName": "Analysis",
-                    "status": "failed",
-                    "progress": 0,
-                    "description": "연결이 끊어져 분석이 중단되었습니다.",
-                }
-            })
-            logger.warning("session_state_reset", session_id=session_id, state="RUNNING->FAILED")
+            if session_id in _analysis_tasks and not _analysis_tasks[session_id].done():
+                # 분석이 아직 실행 중 → 실패가 아님
+                logger.info("analysis_still_running", session_id=session_id)
+            else:
+                # 태스크가 없거나 완료됨 → Redis 상태 불일치 → FAILED로 처리
+                session_context["analysis_state"] = "FAILED"
+                await websocket.send_json({
+                    "type": "status.update",
+                    "payload": {
+                        "sessionId": session_id,
+                        "step": 0,
+                        "totalSteps": 5,
+                        "stepName": "Analysis",
+                        "status": "failed",
+                        "progress": 0,
+                        "description": "연결이 끊어져 분석이 중단되었습니다.",
+                    }
+                })
+                logger.warning("session_state_reset", session_id=session_id, state="RUNNING->FAILED")
+        elif analysis_state == "FAILED":
+            logger.info("session_state_restored", session_id=session_id, state="FAILED")
 
         # 메시지 수신 대기
         while True:
@@ -608,132 +1069,65 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         (is_explicit_request and is_analysis_not_done)
                     )
 
-                accumulated_sub_steps: list[dict] = []
-                sub_step_counter = 0
-                current_phase: dict = {"step": 0, "step_name": "", "phase": ""}
-
-                async def _send_status_update(payload: dict):
-                    payload["subSteps"] = list(accumulated_sub_steps)
-                    await manager.send_message(session_id, {
-                        "type": "status.update",
-                        "payload": payload,
-                    })
-
-                def _event_handler(event: dict):
-                    nonlocal sub_step_counter
-                    event_type = event.get("type", "")
-                    event_data = event.get("data", {})
-
-                    if event_type == "phase_change":
-                        phase = event_data.get("phase")
-                        if phase in PHASE_STATUS_MAP:
-                            for s in accumulated_sub_steps:
-                                if s["status"] == "running":
-                                    s["status"] = "complete"
-                            step, step_name = PHASE_STATUS_MAP[phase]
-                            current_phase["step"] = step
-                            current_phase["step_name"] = step_name
-                            current_phase["phase"] = phase
-                            return _send_status_update({
-                                "sessionId": session_id,
-                                "step": step,
-                                "totalSteps": 5,
-                                "stepName": step_name,
-                                "status": "running",
-                                "progress": 0,
-                                "description": PHASE_DESCRIPTIONS.get(phase, ""),
-                            })
-                    elif event_type in SUB_STEP_DESCRIPTIONS:
-                        for s in accumulated_sub_steps:
-                            if s["status"] == "running":
-                                s["status"] = "complete"
-                        label = _build_sub_step_label(event_type, event_data)
-                        sub_step_counter += 1
-                        accumulated_sub_steps.append({
-                            "id": f"sub-{sub_step_counter}",
-                            "label": label,
-                            "status": "running",
-                            "timestamp": int(time.time() * 1000),
-                        })
-                        # 서브스텝마다 즉시 전송 → 프론트엔드 실시간 반영
-                        if current_phase["step"] > 0:
-                            return _send_status_update({
-                                "sessionId": session_id,
-                                "step": current_phase["step"],
-                                "totalSteps": 5,
-                                "stepName": current_phase["step_name"],
-                                "status": "running",
-                                "progress": 0,
-                                "description": PHASE_DESCRIPTIONS.get(current_phase["phase"], ""),
-                            })
-                    return None
-
                 if should_run_analysis:
+                    # Instead of starting analysis immediately, enter Q&A flow
                     try:
-                        # 분석 상태: RUNNING
-                        session_context["analysis_state"] = "RUNNING"
+                        qa_result = await _build_analysis_questions(session_context)
+                        session_context["analysis_state"] = "AWAITING_INPUT"
+                        session_context["_qa_detection"] = qa_result.get("_detection", {})
 
-                        agent_context = AgentContext(
-                            session_id=session_id,
-                            user_id=session_data.get("user_id"),
-                            data=session_context,
-                            history=session_data.get("messages", []),
-                            event_handler=_event_handler,
-                        )
-                        agent = OrchestratorAgent(agent_context, llm_provider=None)
-                        result = await agent.execute()
-                        session_context.update(agent_context.data)
-                        if result.success:
-                            # Mark all remaining running sub-steps as complete
-                            for s in accumulated_sub_steps:
-                                if s["status"] == "running":
-                                    s["status"] = "complete"
-                            accumulated_sub_steps.append({
-                                "id": f"sub-final",
-                                "label": "전체 분석 파이프라인 완료",
-                                "status": "complete",
-                                "timestamp": int(time.time() * 1000),
+                        # Send intro message
+                        intro_text = "데이터를 확인했습니다. 최적의 분석을 위해 몇 가지 설정을 확인하겠습니다."
+                        for i in range(0, len(intro_text), 200):
+                            await websocket.send_json({
+                                "type": "message.received",
+                                "payload": {
+                                    "sessionId": session_id,
+                                    "messageId": assistant_message_id,
+                                    "chunk": intro_text[i:i + 200],
+                                    "isComplete": False,
+                                }
                             })
-                            # 분석 상태: COMPLETED
-                            session_context["analysis_state"] = "COMPLETED"
-                            assistant_content = "전체 분석 워크플로우가 완료되었습니다. 리포트를 확인해주세요."
-                            await _send_status_update({
+                        await websocket.send_json({
+                            "type": "message.complete",
+                            "payload": {"sessionId": session_id, "messageId": assistant_message_id},
+                        })
+
+                        # Save assistant message
+                        intro_msg = _build_message("assistant", intro_text, message_id=assistant_message_id)
+                        session_data["messages"].append(intro_msg)
+
+                        # Send analysis.questions event
+                        await websocket.send_json({
+                            "type": "analysis.questions",
+                            "payload": {
                                 "sessionId": session_id,
-                                "step": 5,
-                                "totalSteps": 5,
-                                "stepName": "Reporting",
-                                "status": "complete",
-                                "progress": 100,
-                                "description": "분석이 완료되었습니다! 리포트 페이지에서 결과를 확인하세요.",
-                            })
-                        else:
-                            # Mark all remaining running sub-steps as failed
-                            for s in accumulated_sub_steps:
-                                if s["status"] == "running":
-                                    s["status"] = "failed"
-                            accumulated_sub_steps.append({
-                                "id": f"sub-error",
-                                "label": f"분석 실패: {result.error}",
-                                "status": "failed",
-                                "timestamp": int(time.time() * 1000),
-                            })
-                            # 분석 상태: FAILED
-                            session_context["analysis_state"] = "FAILED"
-                            assistant_content = f"분석 워크플로우에 실패했습니다: {result.error}"
-                            await _send_status_update({
-                                "sessionId": session_id,
-                                "step": 5,
-                                "totalSteps": 5,
-                                "stepName": "Reporting",
-                                "status": "failed",
-                                "progress": 100,
-                                "description": f"분석에 실패했습니다: {result.error}",
-                            })
-                    except Exception as agent_exc:
-                        # 분석 상태: FAILED
-                        session_context["analysis_state"] = "FAILED"
-                        logger.error("orchestrator_agent_error", error=str(agent_exc), session_id=session_id)
-                        assistant_content = "분석 워크플로우 실행 중 오류가 발생했습니다."
+                                "profile": qa_result["profile"],
+                                "questions": qa_result["questions"],
+                            },
+                        })
+
+                        sanitized_ctx, _ = _sanitize_for_json(_to_native_types(session_context))
+                        session_data["context"] = sanitized_ctx
+                        session_data["updated_at"] = datetime.now().isoformat()
+                        await run_in_threadpool(session_store.update_session, session_id, session_data)
+
+                        # Skip the rest of the message handling (LLM response, etc.)
+                        continue
+                    except Exception as qa_err:
+                        logger.error("analysis_questions_failed", error=str(qa_err), session_id=session_id)
+                        # Fall through to regular analysis if Q&A fails
+                        pass
+
+                # Legacy path: direct analysis (fallback if Q&A didn't redirect via continue)
+                if should_run_analysis and session_context.get("analysis_state") != "AWAITING_INPUT":
+                    session_context["analysis_state"] = "RUNNING"
+                    session_data["context"] = session_context
+                    task = asyncio.create_task(
+                        _run_analysis_background(session_id, session_data, session_context)
+                    )
+                    _analysis_tasks[session_id] = task
+                    assistant_content = "분석을 시작합니다. 잠시만 기다려주세요."
 
                 streamed_chunks = False
 
@@ -799,97 +1193,63 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
 
                 session_data["messages"].append(assistant_message_obj)
-                def _sanitize_for_json(value, path=""):
-                    drop = object()
-                    if value is None or isinstance(value, (str, int, float, bool)):
-                        return value, []
-                    if isinstance(value, dict):
-                        cleaned = {}
-                        removed = []
-                        for key, item in value.items():
-                            sanitized, removed_child = _sanitize_for_json(
-                                item,
-                                f"{path}.{key}" if path else str(key),
-                            )
-                            if sanitized is not drop:
-                                cleaned[key] = sanitized
-                            else:
-                                removed.append(f"{path}.{key}" if path else str(key))
-                            removed.extend(removed_child)
-                        return cleaned, removed
-                    if isinstance(value, list):
-                        cleaned_list = []
-                        removed = []
-                        for idx, item in enumerate(value):
-                            sanitized, removed_child = _sanitize_for_json(
-                                item,
-                                f"{path}[{idx}]",
-                            )
-                            if sanitized is not drop:
-                                cleaned_list.append(sanitized)
-                            else:
-                                removed.append(f"{path}[{idx}]")
-                            removed.extend(removed_child)
-                        return cleaned_list, removed
-                    return drop, [path]
 
-                sanitized_context, removed_paths = _sanitize_for_json(session_context)
+                sanitized_context, _ = _sanitize_for_json(_to_native_types(session_context))
                 session_data["context"] = sanitized_context
-
-                # region agent log
-                with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({
-                        "sessionId": session_id,
-                        "runId": "post-fix",
-                        "hypothesisId": "H4",
-                        "location": "app/api/routes/chat.py:602",
-                        "message": "context_sanitized",
-                        "data": {
-                            "removed_count": len(removed_paths),
-                            "removed_paths_sample": removed_paths[:10],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }, ensure_ascii=False) + "\n")
-                # endregion
-
-                # region agent log
-                try:
-                    non_serializable = []
-
-                    def _scan(value, path, depth=0):
-                        if depth > 3 or len(non_serializable) > 20:
-                            return
-                        if isinstance(value, datetime):
-                            non_serializable.append({"path": path, "type": type(value).__name__})
-                            return
-                        if isinstance(value, dict):
-                            for key, item in value.items():
-                                _scan(item, f"{path}.{key}", depth + 1)
-                        elif isinstance(value, list):
-                            for idx, item in enumerate(value[:10]):
-                                _scan(item, f"{path}[{idx}]", depth + 1)
-
-                    _scan(session_context, "context")
-                    with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({
-                            "sessionId": session_id,
-                            "runId": "pre-fix",
-                            "hypothesisId": "H4",
-                            "location": "app/api/routes/chat.py:604",
-                            "message": "context_datetime_scan",
-                            "data": {
-                                "count": len(non_serializable),
-                                "paths": non_serializable,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }, ensure_ascii=False) + "\n")
-                except Exception:
-                    pass
-                # endregion
 
                 # 세션 업데이트
                 session_data["updated_at"] = datetime.now().isoformat()
                 await run_in_threadpool(session_store.update_session, session_id, session_data)
+
+            elif data.get("type") == "analysis.answers":
+                # User submitted Q&A answers → build plan and send
+                answers = data.get("answers", {})
+                session_context = session_data.get("context", {}) or {}
+                session_context["user_answers"] = answers
+
+                plan = _build_analysis_plan(answers, session_context)
+                session_context["analysis_state"] = "AWAITING_CONFIRMATION"
+                session_context["analysis_plan"] = plan
+                session_data["context"] = session_context
+                session_data["updated_at"] = datetime.now().isoformat()
+                await run_in_threadpool(session_store.update_session, session_id, session_data)
+
+                await websocket.send_json({
+                    "type": "analysis.plan",
+                    "payload": {
+                        "sessionId": session_id,
+                        "plan": plan,
+                    },
+                })
+
+            elif data.get("type") == "analysis.confirm":
+                # User confirmed plan → inject user_defined_problem and run as background task
+                session_context = session_data.get("context", {}) or {}
+                answers = session_context.get("user_answers", {})
+                plan = session_context.get("analysis_plan", {})
+
+                # Inject user_defined_problem for ProblemDefinitionAgent bypass
+                session_context["user_defined_problem"] = {
+                    "analysis_goal": plan.get("analysisGoal", "데이터 분석 및 예측 모델 구축"),
+                    "target_column": answers.get("target", "target"),
+                    "problem_type": answers.get("problem_type", "binary_classification"),
+                    "evaluation_metric": answers.get("metric", "accuracy"),
+                    "constraints": plan.get("constraints", []),
+                }
+                session_context["analysis_state"] = "RUNNING"
+                session_data["context"] = session_context
+
+                # Save initial state before launching background task
+                sanitized_ctx, _ = _sanitize_for_json(_to_native_types(session_context))
+                session_data["context"] = sanitized_ctx
+                session_data["updated_at"] = datetime.now().isoformat()
+                await run_in_threadpool(session_store.update_session, session_id, session_data)
+
+                # Launch analysis as background task
+                task = asyncio.create_task(
+                    _run_analysis_background(session_id, session_data, session_context)
+                )
+                _analysis_tasks[session_id] = task
 
             elif data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -898,27 +1258,5 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         manager.disconnect(session_id)
         logger.info("websocket_disconnected", session_id=session_id)
     except Exception as e:
-        # region agent log
-        try:
-            context_types = {}
-            if "session_data" in locals() and session_data:
-                ctx = session_data.get("context") or {}
-                context_types = {k: type(v).__name__ for k, v in ctx.items()}
-        except Exception:
-            context_types = {}
-        with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "sessionId": session_id,
-                "runId": "pre-fix",
-                "hypothesisId": "H2",
-                "location": "app/api/routes/chat.py:618",
-                "message": "websocket_exception",
-                "data": {
-                    "error": str(e),
-                    "context_types": context_types,
-                },
-                "timestamp": int(time.time() * 1000),
-            }, ensure_ascii=False) + "\n")
-        # endregion
         logger.error("websocket_error", error=str(e), session_id=session_id)
         manager.disconnect(session_id)

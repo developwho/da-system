@@ -66,8 +66,8 @@ export interface MessageAttachment {
 }
 
 export interface MessageCard {
-  type: 'data-profile' | 'model-result' | 'report-summary' | 'progress';
-  data: DataProfileCard | ModelResultCard | ReportSummaryCard | ProgressCard;
+  type: 'data-profile' | 'model-result' | 'report-summary' | 'progress' | 'analysis-questions' | 'analysis-plan';
+  data: DataProfileCard | ModelResultCard | ReportSummaryCard | ProgressCard | AnalysisQuestionsPayload | AnalysisPlanPayload;
 }
 
 export interface DataProfileCard {
@@ -87,7 +87,8 @@ export interface ModelResultCard {
 export interface ReportSummaryCard {
   sessionId: string;
   title: string;
-  insights: string[];
+  preview: string;
+  insights?: string[];
 }
 
 export interface ProgressCard {
@@ -100,6 +101,64 @@ export interface ProgressCard {
 export interface ChartData {
   type: 'feature-importance' | 'confusion-matrix' | 'roc-curve' | 'distribution';
   data: Record<string, unknown>;
+}
+
+// ============ Pre-Analysis Q&A Types ============
+export interface QuestionOption {
+  value: string;
+  label: string;
+  recommended?: boolean;
+  reason?: string;
+}
+
+export interface AnalysisQuestion {
+  id: string;
+  type: 'text' | 'select' | 'radio';
+  label: string;
+  description?: string;
+  placeholder?: string;
+  options?: QuestionOption[];
+  defaultValue?: string;
+  required?: boolean;
+}
+
+export interface AnalysisProfileSummary {
+  rows: number;
+  columns: number;
+  numericColumns: string[];
+  categoricalColumns: string[];
+  missingCellsPct: number;
+  duplicateRows: number;
+  memoryMB: number;
+}
+
+export interface AnalysisQuestionsPayload {
+  sessionId: string;
+  profile: AnalysisProfileSummary;
+  questions: AnalysisQuestion[];
+  submitted?: boolean;
+  answers?: Record<string, string>;
+}
+
+export interface AnalysisPlanStep {
+  name: string;
+  description: string;
+}
+
+export interface AnalysisPlan {
+  analysisGoal: string;
+  targetColumn: string;
+  problemType: string;
+  evaluationMetric: string;
+  constraints: string[];
+  estimatedDuration: string;
+  steps: AnalysisPlanStep[];
+}
+
+export interface AnalysisPlanPayload {
+  sessionId: string;
+  plan: AnalysisPlan;
+  confirmed?: boolean;
 }
 
 // ============ Analysis Types ============
@@ -119,6 +178,7 @@ export interface SubStep {
   label: string;
   status: 'pending' | 'running' | 'complete' | 'failed';
   timestamp?: number;
+  phase?: string;  // 'ProblemDefinition' | 'Research' | 'Modeling' | 'Insight' | 'Reporting'
 }
 
 export interface AnalysisStepDetails {
@@ -147,6 +207,7 @@ export interface Model {
   trainingStartedAt?: Date;
   trainingCompletedAt?: Date;
   sessionId: string;
+  modelType?: string;
   hyperparameters?: Record<string, unknown>;
   featureImportance?: FeatureImportance[];
 }
@@ -199,6 +260,9 @@ export type WebSocketEventType =
   | 'message.received'
   | 'message.complete'
   | 'status.update'
+  | 'report.ready'
+  | 'analysis.questions'
+  | 'analysis.plan'
   | 'error'
   | 'connected'
   | 'disconnected';

@@ -8,6 +8,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pandas as pd
 import numpy as np
+import os
+import json
 
 from app.utils.logger import get_logger
 from app.storage.mlflow_tracker import MLflowTracker
@@ -155,13 +157,23 @@ async def get_model_info(run_id: str):
         client = MlflowClient()
         experiment = client.get_experiment(run.info.experiment_id)
 
-        # Feature Importance 파싱 (있는 경우)
+        # Feature Importance: artifact에서 먼저 시도, 없으면 params fallback
         feature_importance = None
-        if "feature_importance" in run.data.params:
+        try:
+            artifact_uri = run.info.artifact_uri or ""
+            # MLflow file store uses file:/// prefix
+            artifact_base = artifact_uri.replace("file:///", "").replace("file:", "")
+            fi_artifact_path = os.path.join(artifact_base, "analysis", "feature_importance.json")
+            if os.path.exists(fi_artifact_path):
+                with open(fi_artifact_path, "r", encoding="utf-8") as f:
+                    feature_importance = json.load(f)
+        except Exception:
+            pass
+        # Fallback: check params (legacy)
+        if not feature_importance and "feature_importance" in run.data.params:
             try:
-                import json
                 feature_importance = json.loads(run.data.params["feature_importance"])
-            except:
+            except Exception:
                 pass
 
         model_detail = ModelDetail(
@@ -270,17 +282,24 @@ async def explain_predictions(
         if not run:
             raise HTTPException(status_code=404, detail=f"Model not found: {run_id}")
 
-        # Feature Importance 조회 (저장된 경우)
+        # Feature Importance: artifact에서 먼저 시도, 없으면 params fallback
         feature_importance = None
-        if "feature_importance" in run.data.params:
+        try:
+            artifact_uri = run.info.artifact_uri or ""
+            artifact_base = artifact_uri.replace("file:///", "").replace("file:", "")
+            fi_artifact_path = os.path.join(artifact_base, "analysis", "feature_importance.json")
+            if os.path.exists(fi_artifact_path):
+                with open(fi_artifact_path, "r", encoding="utf-8") as f:
+                    feature_importance = json.load(f)
+        except Exception:
+            pass
+        if not feature_importance and "feature_importance" in run.data.params:
             try:
-                import json
                 feature_importance = json.loads(run.data.params["feature_importance"])
-            except:
+            except Exception:
                 pass
 
         # SHAP artifacts 조회 (outputs/shap/{session_id}/)
-        import os
         session_id = run.data.tags.get("session_id")
         if session_id:
             shap_dir = os.path.join(settings.OUTPUTS_DIR, "shap", session_id)

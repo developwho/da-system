@@ -3,7 +3,6 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import os
 import json
-import time
 import pandas as pd
 
 from app.agents.base import BaseAgent, AgentContext, AgentResult, AgentState
@@ -54,23 +53,9 @@ class ModelingAgent(BaseAgent):
             if not file_id or not target_column:
                 raise ValueError("file_id and target_column are required")
 
-            # region agent log
-            with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "sessionId": self.context.session_id,
-                    "runId": "pre-fix",
-                    "hypothesisId": "H1",
-                    "location": "app/agents/modeling.py:49",
-                    "message": "problem_definition_loaded",
-                    "data": {
-                        "file_id": file_id,
-                        "target_column": target_column,
-                        "problem_type": problem_type,
-                        "evaluation_metric": problem_definition.get("evaluation_metric"),
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }, ensure_ascii=False) + "\n")
-            # endregion
+            self.logger.info("problem_definition_loaded",
+                             file_id=file_id, target_column=target_column,
+                             problem_type=problem_type)
 
             await self.emit_event("data_loading", {"file_id": file_id})
 
@@ -90,22 +75,9 @@ class ModelingAgent(BaseAgent):
             X = df.drop(columns=[target_column])
             y = df[target_column]
 
-            # region agent log
-            with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "sessionId": self.context.session_id,
-                    "runId": "pre-fix",
-                    "hypothesisId": "H1",
-                    "location": "app/agents/modeling.py:76",
-                    "message": "target_stats",
-                    "data": {
-                        "y_dtype": str(y.dtype),
-                        "y_unique": int(y.nunique(dropna=False)),
-                        "y_sample": [str(v) for v in y.dropna().unique()[:5]],
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }, ensure_ascii=False) + "\n")
-            # endregion
+            self.logger.info("target_stats",
+                             y_dtype=str(y.dtype),
+                             y_unique=int(y.nunique(dropna=False)))
 
             # 4. 데이터 전처리
             X = self._preprocess_features(X)
@@ -157,7 +129,29 @@ class ModelingAgent(BaseAgent):
                 }
             )
 
-            # 9. 모델 저장
+            # 9. Feature Importance → MLflow artifact로 저장
+            feature_imp = result.get("feature_importance", {})
+            if feature_imp:
+                fi_list = [
+                    {"feature": k, "importance": float(v), "ranking": i + 1}
+                    for i, (k, v) in enumerate(
+                        sorted(feature_imp.items(), key=lambda x: -x[1])
+                        if isinstance(feature_imp, dict)
+                        else enumerate(feature_imp)
+                    )
+                ]
+                fi_dir = os.path.join(settings.OUTPUTS_DIR, "models", self.context.session_id)
+                os.makedirs(fi_dir, exist_ok=True)
+                fi_path = os.path.join(fi_dir, "feature_importance.json")
+                with open(fi_path, "w", encoding="utf-8") as f:
+                    json.dump(fi_list, f, ensure_ascii=False)
+                try:
+                    tracker.client.log_artifact(run_id, fi_path, artifact_path="analysis")
+                    self.logger.info("feature_importance_logged", count=len(fi_list))
+                except Exception as fi_exc:
+                    self.logger.warning("feature_importance_log_failed", error=str(fi_exc))
+
+            # 10. 모델 저장
             model_dir = os.path.join(
                 settings.OUTPUTS_DIR,
                 "models",
@@ -171,7 +165,7 @@ class ModelingAgent(BaseAgent):
             self.end_time = datetime.now()
             self.state = AgentState.SUCCESS
 
-            # 10. Insight Agent를 위한 데이터 준비 (FLAML에서 반환)
+            # 11. Insight Agent를 위한 데이터 준비 (FLAML에서 반환)
             X_train = result.get("X_train")
             X_test = result.get("X_test")
             y_train = result.get("y_train")
@@ -256,23 +250,22 @@ class ModelingAgent(BaseAgent):
                     self.logger.info(f"dropping_high_cardinality_column", column=col, n_unique=n_unique)
                     X = X.drop(columns=[col])
 
-        # 2. Numeric 아닌 컬럼 처리
+        # 2. Categorical NaN fill + Label Encoding
+        from sklearn.preprocessing import LabelEncoder
         for col in X.columns:
             if X[col].dtype == 'object':
-                # Label Encoding (간단한 방법)
-                from sklearn.preprocessing import LabelEncoder
+                X[col] = X[col].fillna('__MISSING__')
                 le = LabelEncoder()
                 X[col] = le.fit_transform(X[col].astype(str))
                 self.logger.info(f"label_encoded_column", column=col)
 
-        # 3. 결측치 처리
-        if X.isnull().any().any():
-            # Numeric: 중앙값으로 채우기
-            numeric_cols = X.select_dtypes(include=['number']).columns
-            for col in numeric_cols:
-                if X[col].isnull().any():
-                    X[col].fillna(X[col].median(), inplace=True)
+        # 3. Numeric 결측치 처리 (중앙값)
+        numeric_cols = X.select_dtypes(include=['number']).columns
+        for col in numeric_cols:
+            if X[col].isnull().any():
+                X[col].fillna(X[col].median(), inplace=True)
 
-            self.logger.info("missing_values_filled")
+        if X.isnull().any().any():
+            self.logger.warning("remaining_missing_values")
 
         return X

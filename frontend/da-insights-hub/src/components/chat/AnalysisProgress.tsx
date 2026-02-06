@@ -1,6 +1,6 @@
 import { CheckCircle, Loader2, Circle, XCircle, Clock, ChevronDown, ChevronRight } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type { StepStatus, SubStep } from '@/types';
 
 export interface InlineProgressStep {
@@ -81,33 +81,74 @@ function ElapsedTimer({ startTime }: { startTime: number }) {
   );
 }
 
-function SubStepsLog({ subSteps }: { subSteps: SubStep[] }) {
-  const [isOpen, setIsOpen] = useState(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (isOpen && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+/** Group substeps by phase, each phase gets its own collapsible section */
+function PhaseGroupedSubStepsLog({ subSteps }: { subSteps: SubStep[] }) {
+  // Group by phase
+  const groups = useMemo(() => {
+    const map = new Map<string, SubStep[]>();
+    for (const sub of subSteps) {
+      const phase = sub.phase || 'Unknown';
+      if (!map.has(phase)) map.set(phase, []);
+      map.get(phase)!.push(sub);
     }
-  }, [subSteps.length, isOpen]);
+    return map;
+  }, [subSteps]);
 
   if (subSteps.length === 0) return null;
 
   return (
-    <div className="mt-2 border-t border-border/50 pt-2">
+    <div className="mt-2 border-t border-border/50 pt-2 space-y-1">
+      {Array.from(groups.entries()).map(([phase, items]) => (
+        <PhaseSection key={phase} phase={phase} items={items} />
+      ))}
+    </div>
+  );
+}
+
+function PhaseSection({ phase, items }: { phase: string; items: SubStep[] }) {
+  const hasRunning = items.some((s) => s.status === 'running');
+  const [isOpen, setIsOpen] = useState(hasRunning);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-open when phase becomes active, auto-close when completed
+  useEffect(() => {
+    if (hasRunning) setIsOpen(true);
+  }, [hasRunning]);
+
+  // Auto-scroll within this group
+  useEffect(() => {
+    if (isOpen && scrollRef.current) {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [items.length, isOpen]);
+
+  const label = getStepLabel(phase);
+  const completeCount = items.filter((s) => s.status === 'complete').length;
+
+  return (
+    <div>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
       >
         {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        상세 진행 로그 ({subSteps.length})
+        <span className={hasRunning ? 'shimmer-text font-medium' : ''}>
+          {label}
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground/60">
+          {completeCount}/{items.length}
+        </span>
       </button>
       {isOpen && (
         <div
           ref={scrollRef}
-          className="mt-1.5 max-h-40 overflow-y-auto space-y-0.5 pr-1"
+          className="mt-1 ml-3 max-h-28 overflow-y-scroll substep-log-scroll space-y-0.5 pr-1"
         >
-          {subSteps.map((sub, i) => (
+          {items.map((sub, i) => (
             <div
               key={sub.id}
               className="flex items-start gap-1.5 text-xs animate-in fade-in duration-300"
@@ -163,7 +204,7 @@ export function AnalysisProgressInline({ state }: AnalysisProgressInlineProps) {
     <div className="w-full space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-foreground">
+        <span className={`text-sm font-medium text-foreground ${overallStatus === 'running' ? 'shimmer-text' : ''}`}>
           {overallStatus === 'complete'
             ? '분석 완료'
             : overallStatus === 'failed'
@@ -185,7 +226,7 @@ export function AnalysisProgressInline({ state }: AnalysisProgressInlineProps) {
               <span
                 className={`text-[10px] leading-tight text-center whitespace-nowrap ${
                   step.status === 'running'
-                    ? 'font-semibold text-primary'
+                    ? 'font-semibold text-primary shimmer-text'
                     : step.status === 'complete'
                       ? 'text-green-600 dark:text-green-400'
                       : step.status === 'failed'
@@ -216,14 +257,16 @@ export function AnalysisProgressInline({ state }: AnalysisProgressInlineProps) {
 
       {/* Description + percentage */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{description}</span>
+        <span className={`text-xs text-muted-foreground ${overallStatus === 'running' ? 'shimmer-text' : ''}`}>
+          {description}
+        </span>
         <span className="text-xs font-medium text-muted-foreground">
           {overallPercentage}%
         </span>
       </div>
 
-      {/* Sub-steps log */}
-      {subSteps && subSteps.length > 0 && <SubStepsLog subSteps={subSteps} />}
+      {/* Phase-grouped sub-steps log */}
+      {subSteps && subSteps.length > 0 && <PhaseGroupedSubStepsLog subSteps={subSteps} />}
     </div>
   );
 }

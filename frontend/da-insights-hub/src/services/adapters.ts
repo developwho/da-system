@@ -127,6 +127,7 @@ export function toModelDetail(b: BackendModelDetail): Model {
   const base = toModel(b);
   return {
     ...base,
+    modelType: b.best_estimator || undefined,
     hyperparameters: b.params,
     featureImportance: b.feature_importance?.map((fi) => ({
       feature: fi.feature,

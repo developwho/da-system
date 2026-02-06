@@ -1,4 +1,4 @@
-import { MessageSquare, Database, Crown, FileText, Settings, HelpCircle, Bot } from 'lucide-react';
+import { MessageSquare, Database, Crown, FileText, Settings, HelpCircle, Bot, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
@@ -28,7 +28,7 @@ const footerItems = [
 ];
 
 export function AppSidebar() {
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === 'collapsed';
 
   return (
@@ -101,7 +101,28 @@ export function AppSidebar() {
               <span className="text-sm font-medium text-sidebar-foreground">사용자</span>
             </div>
           )}
-          </div>
+        </div>
+
+        {/* Sidebar toggle */}
+        <Separator className="my-2" />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={isCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+              onClick={toggleSidebar}
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              {isCollapsed ? (
+                <ChevronsRight className="h-5 w-5 shrink-0" />
+              ) : (
+                <>
+                  <ChevronsLeft className="h-5 w-5 shrink-0" />
+                  <span>사이드바 접기</span>
+                </>
+              )}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );

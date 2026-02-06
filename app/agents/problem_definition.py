@@ -51,12 +51,10 @@ class ProblemDefinitionAgent(BaseAgent):
                 file_id = self.context.data.get("file_id")
 
                 if file_path:
-                    # file_path로부터 로드
                     from app.core.data_pipeline.loader import DataLoader
                     self.logger.info("loading_dataframe_from_file", file_path=file_path)
                     dataframe, _ = DataLoader.load_file(file_path)
                 elif file_id:
-                    # file_id로부터 로드
                     from app.storage.file_manager import FileManager
                     from app.core.data_pipeline.loader import DataLoader
                     self.logger.info("loading_dataframe_from_file_id", file_id=file_id)
@@ -74,15 +72,29 @@ class ProblemDefinitionAgent(BaseAgent):
             self.data = dataframe
             self.logger.info("dataframe_loaded", shape=dataframe.shape)
 
-            # 1. 데이터 프로파일링
+            # 1. 데이터 프로파일링 (항상 실행 - downstream 에이전트에 필요)
             profile = await self._profile_data()
             self.logger.debug("profile_keys", keys=list(profile.keys()))
 
-            # 2. 문제 유형 자동 감지
-            problem_type = await self._detect_problem_type(profile)
+            # Check for user-defined problem (Q&A bypass)
+            user_defined = self.context.data.get("user_defined_problem")
+            if user_defined:
+                self.logger.info("using_user_defined_problem", target=user_defined.get("target_column"))
+                problem_definition = {
+                    "analysis_goal": user_defined.get("analysis_goal", "데이터 분석 및 예측 모델 구축"),
+                    "target_column": user_defined.get("target_column"),
+                    "problem_type": user_defined.get("problem_type", "binary_classification"),
+                    "evaluation_metric": user_defined.get("evaluation_metric", "accuracy"),
+                    "constraints": user_defined.get("constraints", []),
+                    "reasoning": "사용자가 직접 분석 설정을 지정했습니다.",
+                    "confidence": 1.0,
+                }
+            else:
+                # 2. 문제 유형 자동 감지
+                problem_type = await self._detect_problem_type(profile)
 
-            # 3. LLM을 통한 문제 정의 대화
-            problem_definition = await self._define_problem_with_llm(profile, problem_type)
+                # 3. LLM을 통한 문제 정의 대화
+                problem_definition = await self._define_problem_with_llm(profile, problem_type)
 
             # 4. 결과 컨텍스트에 저장
             self.update_context("data_profile", profile)

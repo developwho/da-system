@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   FileText,
   Download,
-  Eye,
   Zap,
   CheckCircle,
   Loader2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -22,11 +23,17 @@ import { useReports, useReportContent } from '@/hooks/use-reports';
 import { reportsApi } from '@/services/reports-api';
 import { format } from 'date-fns';
 import type { Report } from '@/types';
+import { MarkdownRenderer } from '@/components/ui/markdown-renderer';
 
 export default function ReportsPage() {
   const { data: reports = [], isLoading } = useReports();
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const { data: reportContent } = useReportContent(selectedReportId);
+  const {
+    data: reportContent,
+    isLoading: isReportLoading,
+    isError: isReportError,
+    refetch: refetchReportContent,
+  } = useReportContent(selectedReportId);
 
   const handleDownload = (sessionId: string) => {
     window.open(reportsApi.downloadArtifacts(sessionId), '_blank');
@@ -85,43 +92,92 @@ export default function ReportsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {reports.map((report: Report) => (
-                    <TableRow
-                      key={report.id}
-                      className="cursor-pointer"
-                      onClick={() => setSelectedReportId(report.sessionId)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded bg-red-500/10">
-                            <FileText className="h-4 w-4 text-red-500" />
-                          </div>
-                          <span className="font-medium text-foreground">{report.title}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {report.problemType.replace('_', ' ')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {format(report.createdAt, 'MMM dd, yyyy')}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(report.sessionId);
-                          }}
+                  {reports.map((report: Report) => {
+                    const isExpanded = selectedReportId === report.sessionId;
+                    return (
+                      <Fragment key={report.id}>
+                        <TableRow
+                          className="cursor-pointer"
+                          onClick={() =>
+                            setSelectedReportId((prev) =>
+                              prev === report.sessionId ? null : report.sessionId
+                            )
+                          }
                         >
-                          <Download className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-8 w-8 items-center justify-center rounded bg-red-500/10">
+                                <FileText className="h-4 w-4 text-red-500" />
+                              </div>
+                              <span className="font-medium text-foreground">{report.title}</span>
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {report.problemType.replace('_', ' ')}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {format(report.createdAt, 'MMM dd, yyyy')}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(report.sessionId);
+                              }}
+                            >
+                              <Download className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="bg-muted/20 hover:bg-muted/20">
+                            <TableCell colSpan={4} className="p-0">
+                              <div className="max-h-[600px] overflow-y-auto px-4 py-4">
+                                {isReportLoading ? (
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    리포트 내용을 불러오는 중입니다...
+                                  </div>
+                                ) : isReportError ? (
+                                  <div className="space-y-2 text-sm">
+                                    <p className="text-destructive">
+                                      리포트 내용을 불러오지 못했습니다.
+                                    </p>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        refetchReportContent();
+                                      }}
+                                    >
+                                      다시 시도
+                                    </Button>
+                                  </div>
+                                ) : reportContent ? (
+                                  <MarkdownRenderer content={reportContent} />
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">
+                                    표시할 리포트 내용이 없습니다.
+                                  </p>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </Card>
@@ -135,27 +191,6 @@ export default function ReportsPage() {
           )}
         </div>
 
-        {/* Report Preview */}
-        {selectedReportId && reportContent && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">리포트 미리보기</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap">
-                {reportContent}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* View Report Button */}
-        <div className="flex justify-center pt-4">
-          <Button className="gap-2" size="lg" disabled={!selectedReportId}>
-            <Eye className="h-4 w-4" />
-            리포트 보기
-          </Button>
-        </div>
       </div>
     </div>
   );

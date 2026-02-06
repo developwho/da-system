@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ChatWelcome } from '@/components/chat/ChatWelcome';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { ChatInput } from '@/components/chat/ChatInput';
@@ -8,12 +9,14 @@ import { config } from '@/lib/config';
 import { mockWebSocket } from '@/lib/mock-websocket';
 import { realWebSocket } from '@/lib/websocket-client';
 import { chatApi } from '@/services/chat-api';
-import type { ChatMessage, MessageReceivedPayload, StatusUpdatePayload, MessageCard, StepStatus, SubStep } from '@/types';
+import type { ChatMessage, MessageReceivedPayload, StatusUpdatePayload, MessageCard, StepStatus, SubStep, ReportSummaryCard, AnalysisQuestionsPayload, AnalysisPlanPayload } from '@/types';
 
 // Pick transport based on feature flag
 const ws = config.useMock ? mockWebSocket : realWebSocket;
 
 const PROGRESS_MESSAGE_ID = 'analysis-progress';
+const QUESTIONS_MESSAGE_ID = 'analysis-questions';
+const PLAN_MESSAGE_ID = 'analysis-plan';
 
 const ALL_STEPS = [
   { id: 1, name: 'ProblemDefinition' },
@@ -33,13 +36,16 @@ export default function ChatPage() {
     setActiveSession,
     setWsStatus,
   } = useApp();
+  const queryClient = useQueryClient();
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentStreamingId = useRef<string | null>(null);
   const sessionCreating = useRef(false);
   const analysisStartTime = useRef<number>(0);
-  const progressMessageAdded = useRef(false);
   const accumulatedSubSteps = useRef<SubStep[]>([]);
+  // Keep a ref to latest messages to avoid stale closures
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -127,14 +133,15 @@ export default function ChatPage() {
             analysisStartTime.current = Date.now();
           }
 
-          // Accumulate subSteps from payload
+          // Accumulate subSteps from payload, injecting phase from stepName
           if (payload.subSteps) {
             for (const sub of payload.subSteps) {
-              const idx = accumulatedSubSteps.current.findIndex((s) => s.id === sub.id);
+              const enriched: SubStep = { ...sub, phase: sub.phase || payload.stepName };
+              const idx = accumulatedSubSteps.current.findIndex((s) => s.id === enriched.id);
               if (idx >= 0) {
-                accumulatedSubSteps.current[idx] = sub;
+                accumulatedSubSteps.current[idx] = enriched;
               } else {
-                accumulatedSubSteps.current.push(sub);
+                accumulatedSubSteps.current.push(enriched);
               }
             }
           }
@@ -163,24 +170,78 @@ export default function ChatPage() {
             data: progressState as any,
           };
 
-          // Add or update the progress message (useRef to avoid stale closure)
-          if (!progressMessageAdded.current) {
-            progressMessageAdded.current = true;
-            addMessage({
-              id: PROGRESS_MESSAGE_ID,
-              role: 'assistant',
-              content: '',
-              timestamp: new Date(),
-              cards: [progressCard],
-            });
-          } else {
+          // Check if progress message already exists in current messages (avoids stale ref)
+          const existingProgress = messagesRef.current.find(
+            (m) => m.id === PROGRESS_MESSAGE_ID
+          );
+
+          if (existingProgress) {
             updateMessage(PROGRESS_MESSAGE_ID, { cards: [progressCard] });
+          } else {
+            // Don't create new progress for already finished analyses
+            if (overallStatus !== 'complete' && overallStatus !== 'failed') {
+              addMessage({
+                id: PROGRESS_MESSAGE_ID,
+                role: 'assistant',
+                content: '',
+                timestamp: new Date(),
+                cards: [progressCard],
+              });
+            }
           }
 
           // Reset on completion/failure
           if (overallStatus === 'complete' || overallStatus === 'failed') {
             analysisStartTime.current = 0;
           }
+          break;
+        }
+        case 'report.ready': {
+          const payload = event.payload as { sessionId: string; title: string; preview: string };
+          queryClient.invalidateQueries({ queryKey: ['reports'] });
+          addMessage({
+            id: `report-${payload.sessionId}`,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date(),
+            cards: [{
+              type: 'report-summary',
+              data: {
+                sessionId: payload.sessionId,
+                title: payload.title,
+                preview: payload.preview,
+              } as ReportSummaryCard,
+            }],
+          });
+          break;
+        }
+        case 'analysis.questions': {
+          const payload = event.payload as AnalysisQuestionsPayload;
+          setIsTyping(false);
+          addMessage({
+            id: QUESTIONS_MESSAGE_ID,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date(),
+            cards: [{
+              type: 'analysis-questions',
+              data: payload,
+            }],
+          });
+          break;
+        }
+        case 'analysis.plan': {
+          const payload = event.payload as AnalysisPlanPayload;
+          addMessage({
+            id: PLAN_MESSAGE_ID,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date(),
+            cards: [{
+              type: 'analysis-plan',
+              data: payload,
+            }],
+          });
           break;
         }
       }
@@ -190,12 +251,57 @@ export default function ChatPage() {
       unsubscribe();
       ws.disconnect();
       setWsStatus('disconnected');
-      // Reset progress tracking for next session
-      progressMessageAdded.current = false;
+      // Reset substep accumulation for next session
       accumulatedSubSteps.current = [];
       analysisStartTime.current = 0;
+      // NOTE: no progressMessageAdded ref reset needed — we check messages directly
     };
-  }, [activeSessionId, addMessage, appendToMessage, updateMessage, setWsStatus]);
+  }, [activeSessionId, addMessage, appendToMessage, updateMessage, setWsStatus, queryClient]);
+
+  const handleSubmitAnswers = useCallback(
+    (answers: Record<string, string>) => {
+      // Mark the questions card as submitted
+      const questionsMsg = messagesRef.current.find((m) => m.id === QUESTIONS_MESSAGE_ID);
+      if (questionsMsg?.cards?.[0]) {
+        const updatedData = { ...(questionsMsg.cards[0].data as AnalysisQuestionsPayload), submitted: true, answers };
+        updateMessage(QUESTIONS_MESSAGE_ID, {
+          cards: [{ type: 'analysis-questions', data: updatedData }],
+        });
+      }
+      // Send answers to backend/mock
+      ws.sendAnalysisAnswers(answers);
+    },
+    [updateMessage]
+  );
+
+  const handleConfirmPlan = useCallback(() => {
+    // Mark the plan card as confirmed
+    const planMsg = messagesRef.current.find((m) => m.id === PLAN_MESSAGE_ID);
+    if (planMsg?.cards?.[0]) {
+      const updatedData = { ...(planMsg.cards[0].data as AnalysisPlanPayload), confirmed: true };
+      updateMessage(PLAN_MESSAGE_ID, {
+        cards: [{ type: 'analysis-plan', data: updatedData }],
+      });
+    }
+    // Start analysis
+    ws.sendAnalysisConfirm();
+  }, [updateMessage]);
+
+  const handleEditPlan = useCallback(() => {
+    // Re-enable the questions card for editing
+    const questionsMsg = messagesRef.current.find((m) => m.id === QUESTIONS_MESSAGE_ID);
+    if (questionsMsg?.cards?.[0]) {
+      const updatedData = { ...(questionsMsg.cards[0].data as AnalysisQuestionsPayload), submitted: false };
+      updateMessage(QUESTIONS_MESSAGE_ID, {
+        cards: [{ type: 'analysis-questions', data: updatedData }],
+      });
+    }
+    // Remove the plan card
+    const planMsg = messagesRef.current.find((m) => m.id === PLAN_MESSAGE_ID);
+    if (planMsg) {
+      updateMessage(PLAN_MESSAGE_ID, { cards: [] });
+    }
+  }, [updateMessage]);
 
   const handleSendMessage = useCallback(
     async (content: string, fileId?: string) => {
@@ -230,7 +336,13 @@ export default function ChatPage() {
           {!hasMessages ? (
             <ChatWelcome onAction={handleSendMessage} />
           ) : (
-            <ChatMessages messages={messages} isTyping={isTyping} />
+            <ChatMessages
+              messages={messages}
+              isTyping={isTyping}
+              onSubmitAnswers={handleSubmitAnswers}
+              onConfirmPlan={handleConfirmPlan}
+              onEditPlan={handleEditPlan}
+            />
           )}
           <div ref={messagesEndRef} />
         </div>

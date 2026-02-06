@@ -206,4 +206,29 @@
       transform: translateY(0);
     }
   }
+
+  /* Shimmer effect for running analysis text */
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      currentColor 0%,
+      hsl(var(--primary)) 50%,
+      currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: shimmer 2s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  /* Stable scrollbar for substep logs */
+  .substep-log-scroll {
+    scrollbar-gutter: stable;
+  }
 }

@@ -1,6 +1,6 @@
 # DA System - AI 데이터 분석 자동화 에이전트
 
-**Version:** 1.0.0-rc6 | **Updated:** 2026-02-05 | **Status:** 98% Production Ready
+**Version:** 1.0.0-rc9 | **Updated:** 2026-02-06 | **Status:** 99% Production Ready
 
 비전문가도 고품질 데이터 분석을 수행할 수 있도록 돕는 AI 에이전트 기반 자동화 시스템.
 데이터 업로드 → 문제 정의 → 선행연구 → 모델링 → 인사이트 → 리포트까지 15~30분 내 자동 완료.
@@ -69,7 +69,10 @@ React (8080) → Vite Proxy → FastAPI (8000)
 ```
 
 **워크플로우 상태 머신:**
-`IDLE → PROBLEM_DEFINITION → RESEARCH → MODELING → INSIGHT → REPORTING → COMPLETED`
+`NOT_STARTED → AWAITING_INPUT → AWAITING_CONFIRMATION → RUNNING → COMPLETED/FAILED`
+
+**분석 플로우 (rc8+):**
+`파일 업로드 → 데이터 프로파일 + Q&A → 사용자 응답 → 분석 계획 확인 → Background Task 분석 시작`
 
 ---
 
@@ -151,9 +154,10 @@ D:\dasystem/
 - **데이터 전달**: context.data에 file_path 저장, DataFrame은 런타임 로드
 
 ### FLAML 이슈
-- Object 컬럼 → LabelEncoding 필수 (`_preprocess_features()`)
+- Object 컬럼 → `fillna('__MISSING__')` 후 LabelEncoding (`_preprocess_features()`)
 - Binary target인데 multiclass 오류 → `binary_classification` 강제
 - 예측 시 FLAML이 전처리한 X_test 사용
+- Feature importance → MLflow artifact (`analysis/feature_importance.json`)
 
 ### Redis
 - DataFrame 저장 불가 → file_path만 저장
@@ -168,6 +172,8 @@ D:\dasystem/
 - **분석 진행률**: 채팅 메시지 내 인라인 프로그레스 (`AnalysisProgressInline`)
   - `status.update` → `addMessage/updateMessage` (id=`analysis-progress`)
   - 5단계: ProblemDefinition → Research → Modeling → Insight → Reporting
+- **분석 Q&A**: `analysis.questions` → `analysis.answers` → `analysis.plan` → `analysis.confirm`
+- **Background Task**: 분석은 `asyncio.create_task()`로 실행 → 페이지 이동해도 분석 계속
 
 ### LLM 설정
 - 기본 채팅: `CHAT_LLM_PROVIDER=gemini` (app/config.py, 환경변수 오버라이드 가능)
@@ -197,6 +203,10 @@ D:\dasystem/
 | 한글화 + 다크모드 + 브랜딩 | 100% |
 | 인라인 분석 진행률 (채팅 메시지 통합) | 100% |
 | XAI 서브스텝 로그 + 프로그레스바 버그 수정 | 100% |
+| Phase-based substep toggles + Shimmer UI | 100% |
+| Feature importance artifacts + Report cards in chat | 100% |
+| Interactive Pre-Analysis Q&A | 100% |
+| Background Task Architecture + 프로덕션 품질 개선 | 100% |
 
 ### 미완료 / 다음 단계
 | 항목 | 우선순위 |
@@ -216,6 +226,9 @@ D:\dasystem/
 
 | 버전 | 날짜 | 요약 |
 |------|------|------|
+| 1.0.0-rc9 | 2026-02-06 | Background Task 분석, 리포트 저장/표시 수정, 중복 프로그레스 제거, NaN 전처리 개선, debug.log 제거 |
+| 1.0.0-rc8 | 2026-02-06 | Interactive Pre-Analysis Q&A (파일→질문→계획→확인→분석) |
+| 1.0.0-rc7 | 2026-02-06 | Phase-based substep toggles, Shimmer UI, Feature importance artifacts, Report cards |
 | 1.0.0-rc6 | 2026-02-05 | 프로그레스바 중복 버그 수정(useRef), XAI 서브스텝 로그, 실제 에이전트 이벤트 매핑 |
 | 1.0.0-rc5 | 2026-02-05 | 인라인 진행률 (채팅 메시지 통합), emit_event async 전환, 재연결 플래시 수정 |
 | 1.0.0-rc4 | 2026-02-05 | 한글화, 다크모드, 브랜딩, API Key 개발모드 |
