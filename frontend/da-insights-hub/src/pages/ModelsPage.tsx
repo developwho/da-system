@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Brain, Download, Eye, MessageSquare, CheckCircle, Clock, XCircle, TrendingUp, Loader2 } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Brain, Download, Eye, CheckCircle, Clock, XCircle, TrendingUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -19,6 +21,7 @@ import { config } from '@/lib/config';
 import type { ModelStatus, Model } from '@/types';
 
 export default function ModelsPage() {
+  const navigate = useNavigate();
   const { activeSessionId } = useApp();
   // 현재 세션의 모델만 조회
   const experimentName = activeSessionId ? `session_${activeSessionId}` : undefined;
@@ -55,7 +58,7 @@ export default function ModelsPage() {
               학습된 ML 모델을 추적하고 비교합니다
             </p>
           </div>
-          <Button className="gap-2">
+          <Button className="gap-2" onClick={() => navigate('/')}>
             <TrendingUp className="h-4 w-4" />
             새 모델 학습
           </Button>
@@ -236,19 +239,14 @@ function ModelCard({ model }: { model: Model }) {
             상세
           </Button>
           {model.status === 'complete' && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={handleDownload}
-              >
-                <Download className="h-3 w-3" />
-              </Button>
-              <Button variant="outline" size="sm" className="gap-1">
-                <MessageSquare className="h-3 w-3" />
-              </Button>
-            </>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={handleDownload}
+            >
+              <Download className="h-3 w-3" />
+            </Button>
           )}
         </div>
       </CardContent>
@@ -262,8 +260,24 @@ function ModelCard({ model }: { model: Model }) {
           </DialogHeader>
 
           {isLoadingDetail ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="space-y-6 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="space-y-2">
+                    <Skeleton className="h-4 w-20" />
+                    <Skeleton className="h-6 w-32" />
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-24" />
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="space-y-1">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-2 w-full" />
+                  </div>
+                ))}
+              </div>
             </div>
           ) : modelDetail ? (
             <div className="space-y-6">
@@ -356,9 +370,11 @@ function EmptyState({ activeTab }: { activeTab: string }) {
       <CardContent className="text-center">
         <p className="mb-4 text-sm text-muted-foreground">{description}</p>
         {activeTab === 'all' && (
-          <Button className="gap-2">
-            <TrendingUp className="h-4 w-4" />
-            새 모델 학습
+          <Button className="gap-2" asChild>
+            <Link to="/">
+              <TrendingUp className="h-4 w-4" />
+              새 모델 학습
+            </Link>
           </Button>
         )}
       </CardContent>

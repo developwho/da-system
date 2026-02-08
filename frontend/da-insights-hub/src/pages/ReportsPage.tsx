@@ -21,7 +21,9 @@ import {
 } from '@/components/ui/table';
 import { useReports, useReportContent } from '@/hooks/use-reports';
 import { reportsApi } from '@/services/reports-api';
-import { format } from 'date-fns';
+import { Skeleton } from '@/components/ui/skeleton';
+import { format, formatDistanceToNow } from 'date-fns';
+import { ko } from 'date-fns/locale';
 import type { Report } from '@/types';
 import { MarkdownRenderer } from '@/components/ui/markdown-renderer';
 
@@ -52,7 +54,7 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Stats cards */}
+        {/* Stats card */}
         <div className="grid gap-4 sm:grid-cols-2">
           <StatCard
             icon={Zap}
@@ -63,10 +65,14 @@ export default function ReportsPage() {
           />
           <StatCard
             icon={CheckCircle}
-            title="완료된 분석"
-            value={String(reports.length)}
-            badge="100%"
-            badgeVariant="default"
+            title="최근 생성"
+            value={
+              reports.length > 0
+                ? formatDistanceToNow(reports[0].createdAt, { addSuffix: true, locale: ko })
+                : '—'
+            }
+            badge={reports.length > 0 ? '최신' : '없음'}
+            badgeVariant={reports.length > 0 ? 'success' : 'default'}
           />
         </div>
 
@@ -144,9 +150,15 @@ export default function ReportsPage() {
                             <TableCell colSpan={4} className="p-0">
                               <div className="max-h-[600px] overflow-y-auto px-4 py-4">
                                 {isReportLoading ? (
-                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    리포트 내용을 불러오는 중입니다...
+                                  <div className="space-y-3 py-2">
+                                    <Skeleton className="h-6 w-48" />
+                                    <Skeleton className="h-4 w-full" />
+                                    <Skeleton className="h-4 w-3/4" />
+                                    <Skeleton className="h-4 w-full" />
+                                    <Skeleton className="h-4 w-5/6" />
+                                    <Skeleton className="h-6 w-36 mt-4" />
+                                    <Skeleton className="h-4 w-full" />
+                                    <Skeleton className="h-4 w-2/3" />
                                   </div>
                                 ) : isReportError ? (
                                   <div className="space-y-2 text-sm">

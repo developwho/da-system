@@ -25,6 +25,15 @@ export function useSession(sessionId: string | null) {
   });
 }
 
+export function useSessions() {
+  return useQuery({
+    queryKey: ['sessions'],
+    enabled: !config.useMock,
+    queryFn: () => chatApi.listSessions(50),
+    refetchInterval: 30_000,
+  });
+}
+
 export function useSendMessage() {
   return useMutation({
     mutationFn: async ({

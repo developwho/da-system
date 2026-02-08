@@ -210,11 +210,11 @@ export default function DataPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toast.info('준비 중인 기능입니다')}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toast.info('준비 중인 기능입니다')}>
                               <BarChart3 className="mr-2 h-4 w-4" />
                               Profile
                             </DropdownMenuItem>

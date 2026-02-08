@@ -1,12 +1,13 @@
-import { MessageSquare, Database, Crown, FileText, Settings, HelpCircle, Bot, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { MessageSquare, Database, Crown, FileText, HelpCircle, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { NavLink } from '@/components/NavLink';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -14,6 +15,12 @@ import {
   SidebarFooter,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { useApp } from '@/contexts/AppContext';
+import { useSessions } from '@/hooks/use-chat';
+import { chatApi } from '@/services/chat-api';
+import { SessionList } from '@/components/chat/SessionList';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
 const navItems = [
   { title: '채팅', url: '/', icon: MessageSquare },
@@ -22,14 +29,41 @@ const navItems = [
   { title: '리포트', url: '/reports', icon: FileText },
 ];
 
-const footerItems = [
-  { title: '설정', icon: Settings },
-  { title: '도움말', icon: HelpCircle },
-];
-
 export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === 'collapsed';
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isChatPage = location.pathname === '/';
+  const { activeSessionId, setActiveSession, clearMessages } = useApp();
+  const { data: sessionsData, isLoading: isSessionsLoading } = useSessions();
+  const queryClient = useQueryClient();
+
+  const handleNewChat = () => {
+    clearMessages();
+    setActiveSession('session-new');
+    navigate('/');
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    if (sessionId === activeSessionId) return;
+    clearMessages();
+    setActiveSession(sessionId);
+    navigate('/');
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await chatApi.deleteSession(sessionId);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      if (sessionId === activeSessionId) {
+        handleNewChat();
+      }
+      toast.success('세션이 삭제되었습니다');
+    } catch {
+      toast.error('세션 삭제에 실패했습니다');
+    }
+  };
 
   return (
     <Sidebar
@@ -38,9 +72,7 @@ export function AppSidebar() {
     >
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-            <Bot className="h-5 w-5 text-foreground" />
-          </div>
+          <img src="/icon.svg" alt="DA System" className="h-8 w-8 rounded-full" />
           {!isCollapsed && (
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-sidebar-foreground">DA System</span>
@@ -72,36 +104,41 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Session history - only on chat page and expanded sidebar */}
+        {isChatPage && !isCollapsed && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-xs text-muted-foreground">대화 기록</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SessionList
+                sessions={sessionsData?.sessions ?? []}
+                activeSessionId={activeSessionId}
+                isLoading={isSessionsLoading}
+                onSelectSession={handleSelectSession}
+                onNewChat={handleNewChat}
+                onDeleteSession={handleDeleteSession}
+              />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-2">
         <Separator className="mb-2" />
 
-        {/* Settings and Help */}
+        {/* Help */}
         <SidebarMenu>
-          {footerItems.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
-                <item.icon className="h-5 w-5 shrink-0" />
-                {!isCollapsed && <span>{item.title}</span>}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="도움말"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              onClick={() => toast.info('준비 중인 기능입니다')}
+            >
+              <HelpCircle className="h-5 w-5 shrink-0" />
+              {!isCollapsed && <span>도움말</span>}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
-
-        {/* User profile */}
-        <div className="mt-2 flex items-center gap-3 rounded-lg px-3 py-2">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-primary/80 text-primary-foreground text-xs">
-              U
-            </AvatarFallback>
-          </Avatar>
-          {!isCollapsed && (
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-sidebar-foreground">사용자</span>
-            </div>
-          )}
-        </div>
 
         {/* Sidebar toggle */}
         <Separator className="my-2" />

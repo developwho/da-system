@@ -1,9 +1,11 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { Upload } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChatWelcome } from '@/components/chat/ChatWelcome';
 import { ChatMessages } from '@/components/chat/ChatMessages';
-import { ChatInput } from '@/components/chat/ChatInput';
+import { ChatInput, validateFiles } from '@/components/chat/ChatInput';
 import type { InlineProgressState } from '@/components/chat/AnalysisProgress';
+import { toast } from 'sonner';
 import { useApp } from '@/contexts/AppContext';
 import { config } from '@/lib/config';
 import { mockWebSocket } from '@/lib/mock-websocket';
@@ -38,6 +40,8 @@ export default function ChatPage() {
   } = useApp();
   const queryClient = useQueryClient();
   const [isTyping, setIsTyping] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentStreamingId = useRef<string | null>(null);
   const sessionCreating = useRef(false);
@@ -52,10 +56,16 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Create a real backend session if needed
+  // Create a session if needed
   useEffect(() => {
-    if (config.useMock) return;
     if (activeSessionId && activeSessionId !== 'session-new') return;
+
+    if (config.useMock) {
+      // Mock mode: assign a default session ID immediately
+      setActiveSession('session-1');
+      return;
+    }
+
     if (sessionCreating.current) return;
 
     sessionCreating.current = true;
@@ -303,6 +313,71 @@ export default function ChatPage() {
     }
   }, [updateMessage]);
 
+  const handleStopGeneration = useCallback(() => {
+    setIsTyping(false);
+    if (currentStreamingId.current) {
+      updateMessage(currentStreamingId.current, { isStreaming: false });
+      currentStreamingId.current = null;
+    }
+    // Stop mock analysis if running
+    if (config.useMock && 'stopAnalysis' in ws) {
+      (ws as any).stopAnalysis();
+    }
+  }, [updateMessage]);
+
+  const handleRetry = useCallback(() => {
+    // Find the last user message and resend it
+    const lastUserMsg = [...messagesRef.current].reverse().find((m) => m.role === 'user');
+    if (lastUserMsg) {
+      setIsTyping(true);
+      ws.sendMessage(lastUserMsg.content);
+    }
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    const { valid, invalid } = validateFiles(files);
+    if (invalid.length > 0) {
+      toast.error(`지원하지 않는 형식: ${invalid.join(', ')}`);
+    }
+    if (valid.length > 0) {
+      // Use the exposed method to add files
+      if ((ChatInput as any)._addFiles) {
+        (ChatInput as any)._addFiles(valid);
+      }
+    }
+  }, []);
+
   const handleSendMessage = useCallback(
     async (content: string, fileId?: string) => {
       // Add user message
@@ -329,7 +404,24 @@ export default function ChatPage() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="relative flex h-full flex-col"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed border-primary p-12">
+            <Upload className="h-12 w-12 text-primary animate-bounce" />
+            <p className="text-lg font-medium text-foreground">파일을 여기에 놓으세요</p>
+            <p className="text-sm text-muted-foreground">CSV, Excel 파일을 지원합니다</p>
+          </div>
+        </div>
+      )}
+
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-6">
@@ -342,6 +434,8 @@ export default function ChatPage() {
               onSubmitAnswers={handleSubmitAnswers}
               onConfirmPlan={handleConfirmPlan}
               onEditPlan={handleEditPlan}
+              onStopGeneration={handleStopGeneration}
+              onRetry={handleRetry}
             />
           )}
           <div ref={messagesEndRef} />
