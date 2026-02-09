@@ -1,4 +1,4 @@
-import { FileUp, Play, FileText } from 'lucide-react';
+import { FileUp, TrendingUp, FileText } from 'lucide-react';
 
 interface ChatWelcomeProps {
   onAction: (content: string, fileId?: string) => void;
@@ -6,16 +6,16 @@ interface ChatWelcomeProps {
 
 const quickActions = [
   {
+    icon: TrendingUp,
+    title: '에너지 가격 예측',
+    description: 'AI 에이전트가 도시가스 도입 원가를 분석하고 예측합니다',
+    action: '다음 달 도시가스 가격을 예측하고 싶어요',
+  },
+  {
     icon: FileUp,
     title: '데이터 업로드',
     description: 'CSV 또는 Excel 파일을 업로드하여 분석을 시작하세요',
     action: '데이터셋을 분석하고 싶습니다',
-  },
-  {
-    icon: Play,
-    title: '샘플 분석',
-    description: '샘플 데이터로 시스템 기능을 체험해보세요',
-    action: '샘플 데이터셋으로 분석을 보여주세요',
   },
   {
     icon: FileText,

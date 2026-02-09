@@ -8,7 +8,13 @@ import type {
   AnalysisQuestionsPayload,
   AnalysisPlanPayload,
 } from '@/types';
-import { analysisStepsTemplate } from './mock-data';
+import {
+  analysisStepsTemplate,
+  MOCK_INTENT_RESPONSE,
+  MOCK_DATA_ANALYSIS_RESPONSE,
+  MOCK_DATA_ANALYSIS_COLD_RESPONSE,
+  MOCK_GUIDE_RESPONSE,
+} from './mock-data';
 
 const MOCK_DESCRIPTIONS: Record<number, string> = {
   1: '에너지 가격 데이터를 분석하고 예측 문제를 정의하고 있습니다...',
@@ -53,17 +59,27 @@ const STEP_TO_PHASE: Record<number, string> = {
   5: 'Reporting',
 };
 
+/** Keywords that trigger the energy domain intent response */
+const ENERGY_KEYWORDS = ['에너지', '가격', '예측', '가스', '도시가스', '원가', 'lng', '브렌트', 'jkm', '전력', '전기'];
+
+type ConversationPhase = 'idle' | 'intent_shared' | 'file_uploaded' | 'analyzing' | 'complete';
 type EventCallback = (event: WebSocketEvent) => void;
 
 /**
  * MockWebSocket simulates real-time WebSocket events for development.
  * It mimics the backend's WebSocket behavior with realistic timing.
+ *
+ * RC12: Conversation state machine for premium multi-turn demo experience.
  */
 class MockWebSocket {
   private listeners: EventCallback[] = [];
   private isRunning = false;
   private currentSessionId: string | null = null;
   private abortController: AbortController | null = null;
+
+  /** RC12: Conversation state tracking */
+  private conversationState: ConversationPhase = 'idle';
+  private userIntent: string | null = null;
 
   subscribe(callback: EventCallback): () => void {
     this.listeners.push(callback);
@@ -78,6 +94,9 @@ class MockWebSocket {
 
   connect(sessionId: string): void {
     this.currentSessionId = sessionId;
+    // Reset conversation state on new connection
+    this.conversationState = 'idle';
+    this.userIntent = null;
     setTimeout(() => {
       this.emit({ type: 'connected', payload: { sessionId } });
     }, 100);
@@ -94,17 +113,35 @@ class MockWebSocket {
   private lastFileId: string | null = null;
 
   /**
-   * Simulates sending a message and receiving AI response
+   * Simulates sending a message and receiving AI response.
+   * RC12: Routes based on conversation state for multi-turn flow.
    */
   async sendMessage(content: string, fileId?: string): Promise<void> {
     if (!this.currentSessionId) return;
 
-    // If file is attached, start Q&A flow instead of immediate analysis
     if (fileId) {
+      // File uploaded — always go to data analysis
       this.lastFileId = fileId;
-      await this.simulateQuestions(this.currentSessionId);
+      const hasContext = this.conversationState === 'intent_shared';
+      this.conversationState = 'file_uploaded';
+      await this.simulateDataAnalysis(this.currentSessionId, hasContext);
+    } else if (this.conversationState === 'idle') {
+      // First text message — check if it's an energy intent or guide request
+      if (this.isGuideRequest(content)) {
+        await this.simulateGuideResponse(this.currentSessionId);
+      } else if (this.isEnergyIntent(content)) {
+        this.userIntent = content;
+        this.conversationState = 'intent_shared';
+        await this.simulateIntentResponse(this.currentSessionId);
+      } else {
+        // Generic message — use default response
+        await this.simulateResponse(this.currentSessionId, content);
+      }
+    } else if (this.conversationState === 'intent_shared') {
+      // Already shared intent, waiting for file — respond with gentle nudge or default
+      await this.simulateResponse(this.currentSessionId, content);
     } else {
-      // Simple Q&A response
+      // Default fallback
       await this.simulateResponse(this.currentSessionId, content);
     }
   }
@@ -118,10 +155,16 @@ class MockWebSocket {
 
     await this.delay(500);
 
+    // Build analysis goal with conversation context
+    const defaultGoal = '국내 가스 도입 원가 예측 모델 구축 및 주요 영향 요인 분석';
+    const contextualGoal = this.userIntent
+      ? '말씀하신 도시가스 가격 예측을 위한 최적 모델 구축 및 주요 영향 요인 정량 분석'
+      : defaultGoal;
+
     const plan: AnalysisPlanPayload = {
       sessionId: this.currentSessionId,
       plan: {
-        analysisGoal: answers.goal || '국내 가스 도입 원가 예측 모델 구축 및 주요 영향 요인 분석',
+        analysisGoal: answers.goal || contextualGoal,
         targetColumn: answers.target || 'domestic_gas_price',
         problemType: answers.problem_type || 'regression',
         evaluationMetric: answers.metric || 'rmse',
@@ -151,26 +194,60 @@ class MockWebSocket {
    */
   async sendAnalysisConfirm(): Promise<void> {
     if (!this.currentSessionId) return;
+    this.conversationState = 'analyzing';
     await this.simulateAnalysis(this.currentSessionId, this.lastFileId || 'mock-file');
   }
 
+  /** Check if user message is about energy/gas/price prediction */
+  private isEnergyIntent(message: string): boolean {
+    const lower = message.toLowerCase();
+    return ENERGY_KEYWORDS.some((kw) => lower.includes(kw));
+  }
+
+  /** Check if user is asking about system guide */
+  private isGuideRequest(message: string): boolean {
+    const lower = message.toLowerCase();
+    return lower.includes('시스템') || lower.includes('안내') || lower.includes('어떤 분석') || lower.includes('할 수 있');
+  }
+
   /**
-   * Simulates the Q&A flow: intro message + analysis.questions event
+   * RC12: Simulates a domain expert response after user shares intent.
+   * Rich markdown with business value + ideal data table + file upload prompt.
+   */
+  private async simulateIntentResponse(sessionId: string): Promise<void> {
+    const messageId = `msg-intent-${Date.now()}`;
+    await this.streamMessage(sessionId, messageId, MOCK_INTENT_RESPONSE, 1500);
+  }
+
+  /**
+   * RC12: Simulates rich data analysis response after file upload.
+   * Shows data overview, variable analysis, and analysis direction.
+   * Then transitions to Q&A flow.
+   */
+  private async simulateDataAnalysis(sessionId: string, hasContext: boolean): Promise<void> {
+    const messageId = `msg-data-${Date.now()}`;
+    const responseText = hasContext ? MOCK_DATA_ANALYSIS_RESPONSE : MOCK_DATA_ANALYSIS_COLD_RESPONSE;
+
+    await this.streamMessage(sessionId, messageId, responseText, 2000);
+
+    // After data analysis response, transition to Q&A
+    await this.delay(1000);
+    await this.simulateQuestions(sessionId);
+  }
+
+  /**
+   * RC12: Simulates system guide response (no analysis flow).
+   */
+  private async simulateGuideResponse(sessionId: string): Promise<void> {
+    const messageId = `msg-guide-${Date.now()}`;
+    await this.streamMessage(sessionId, messageId, MOCK_GUIDE_RESPONSE, 1500);
+  }
+
+  /**
+   * Simulates the Q&A flow: analysis.questions event only.
+   * RC12: Intro message removed — data analysis response replaces it.
    */
   private async simulateQuestions(sessionId: string): Promise<void> {
-    // Enable streaming temporarily (streamMessage checks isRunning)
-    this.isRunning = true;
-    const introId = `msg-intro-${Date.now()}`;
-    await this.streamMessage(
-      sessionId,
-      introId,
-      '데이터를 확인했습니다. 최적의 분석을 위해 몇 가지 설정을 확인하겠습니다.'
-    );
-    this.isRunning = false;
-
-    await this.delay(300);
-
-    // Send analysis.questions event
     const questionsPayload: AnalysisQuestionsPayload = {
       sessionId,
       profile: {
@@ -191,12 +268,14 @@ class MockWebSocket {
         {
           id: 'target',
           type: 'select',
-          label: '\ud0c0\uac9f \ubcc0\uc218 (\uc608\uce21\ud560 \ucee8\ub7fc)',
-          description: '\ubaa8\ub378\uc774 \uc608\uce21\ud560 \ub300\uc0c1 \ucee8\ub7fc\uc744 \uc120\ud0dd\ud558\uc138\uc694.',
+          label: '타겟 변수 (예측할 컬럼)',
+          description: this.userIntent
+            ? '말씀하신 가격 예측 목표에 맞춰 타겟 변수를 추천합니다.'
+            : '모델이 예측할 대상 컬럼을 선택하세요.',
           required: true,
           defaultValue: 'domestic_gas_price',
           options: [
-            { value: 'domestic_gas_price', label: 'domestic_gas_price', recommended: true, reason: '\uc5f0\uc18d\ud615 \ubcc0\uc218, \uad6d\ub0b4 \uac00\uc2a4 \ub3c4\uc785 \uc6d0\uac00 (\uc6d0/MJ)' },
+            { value: 'domestic_gas_price', label: 'domestic_gas_price', recommended: true, reason: '연속형 변수, 국내 가스 도입 원가 (원/MJ)' },
             { value: 'brent_oil_price', label: 'brent_oil_price' },
             { value: 'jkm_spot_price', label: 'jkm_spot_price' },
           ],
@@ -204,34 +283,36 @@ class MockWebSocket {
         {
           id: 'problem_type',
           type: 'radio',
-          label: '\ubb38\uc81c \uc720\ud615',
-          description: '\ub370\uc774\ud130\uc758 \ud2b9\uc131\uc744 \ubd84\uc11d\ud55c \uacb0\uacfc, \ud68c\uadc0 \ubd84\uc11d\uc744 \ucd94\ucc9c\ud569\ub2c8\ub2e4.',
+          label: '문제 유형',
+          description: '데이터의 특성을 분석한 결과, 회귀 분석을 추천합니다.',
           required: true,
           defaultValue: 'regression',
           options: [
-            { value: 'regression', label: '\ud68c\uadc0', recommended: true, reason: '\ud0c0\uac9f\uc774 \uc5f0\uc18d\ud615 \uc218\uce58 (\uc6d0/MJ)' },
-            { value: 'time_series', label: '\uc2dc\uacc4\uc5f4 \uc608\uce21' },
+            { value: 'regression', label: '회귀', recommended: true, reason: '타겟이 연속형 수치 (원/MJ)' },
+            { value: 'time_series', label: '시계열 예측' },
           ],
         },
         {
           id: 'metric',
           type: 'radio',
-          label: '\ud3c9\uac00 \uc9c0\ud45c',
-          description: '\ubaa8\ub378 \uc131\ub2a5\uc744 \uce21\uc815\ud560 \uc9c0\ud45c\ub97c \uc120\ud0dd\ud558\uc138\uc694.',
+          label: '평가 지표',
+          description: '모델 성능을 측정할 지표를 선택하세요.',
           required: true,
           defaultValue: 'rmse',
           options: [
-            { value: 'rmse', label: 'RMSE', recommended: true, reason: '\uc624\ucc28 \ud06c\uae30\uc5d0 \ubbfc\uac10, \uc774\uc0c1\uce58 \ud0d0\uc9c0\uc5d0 \uc801\ud569' },
-            { value: 'mae', label: 'MAE', reason: '\ud3c9\uade0 \uc808\ub300 \uc624\ucc28' },
-            { value: 'r2', label: 'R\u00B2', reason: '\uc124\uba85\ub825 \uc9c0\ud45c' },
+            { value: 'rmse', label: 'RMSE', recommended: true, reason: '오차 크기에 민감, 이상치 탐지에 적합' },
+            { value: 'mae', label: 'MAE', reason: '평균 절대 오차' },
+            { value: 'r2', label: 'R\u00B2', reason: '설명력 지표' },
           ],
         },
         {
           id: 'goal',
           type: 'text',
-          label: '\ubd84\uc11d \ubaa9\ud45c (\uc120\ud0dd\uc0ac\ud56d)',
-          description: '\ubd84\uc11d\uc758 \ube44\uc988\ub2c8\uc2a4 \ubaa9\ud45c\ub97c \uac04\ub2e8\ud788 \uc124\uba85\ud574\uc8fc\uc138\uc694.',
-          placeholder: '\ud5a5\ud6c4 \uac00\uc2a4 \ub3c4\uc785 \uc6d0\uac00\ub97c \uc608\uce21\ud558\uc5ec \uc601\uc5c5 \uc758\uc0ac\uacb0\uc815\uc5d0 \ud65c\uc6a9',
+          label: '분석 목표 (선택사항)',
+          description: '분석의 비즈니스 목표를 간단히 설명해주세요.',
+          placeholder: this.userIntent
+            ? '도시가스 도입 원가를 예측하여 매입 시점 최적화에 활용'
+            : '향후 가스 도입 원가를 예측하여 영업 의사결정에 활용',
           required: false,
         },
       ],
@@ -248,53 +329,32 @@ class MockWebSocket {
    */
   private async simulateResponse(sessionId: string, userMessage: string): Promise<void> {
     const responses: Record<string, string> = {
-      default: `\ub370\uc774\ud130 \ubd84\uc11d\uc744 \ub3c4\uc640\ub4dc\ub9ac\uaca0\uc2b5\ub2c8\ub2e4. \ub2e4\uc74c \uc791\uc5c5\uc744 \uc218\ud589\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4:
+      default: `데이터 분석을 도와드리겠습니다. 다음 작업을 수행할 수 있습니다:
 
-1. **\ub370\uc774\ud130 \uc5c5\ub85c\ub4dc** \u2014 CSV \ub610\ub294 Excel \ud30c\uc77c\uc744 \ub4dc\ub798\uadf8\uc575\ub4dc\ub86d\ud558\uc138\uc694
-2. **\uc5c5\ub85c\ub4dc\ub41c \ub370\uc774\ud130 \ud655\uc778** \u2014 \ub370\uc774\ud130 \ud0ed\uc5d0\uc11c \ud30c\uc77c\uc744 \ud655\uc778\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4
-3. **\ubaa8\ub378 \ud559\uc2b5** \u2014 \ub370\uc774\ud130\uc14b\uc744 \uc120\ud0dd\ud558\uba74 \uc790\ub3d9\uc73c\ub85c ML \ud559\uc2b5\uc744 \uc2dc\uc791\ud569\ub2c8\ub2e4
-4. **\ub9ac\ud3ec\ud2b8 \ud655\uc778** \u2014 \uc0dd\uc131\ub41c \ubd84\uc11d \ub9ac\ud3ec\ud2b8\ub97c \ud655\uc778\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4
+1. **데이터 업로드** \u2014 CSV 또는 Excel 파일을 드래그앤드롭하세요
+2. **업로드된 데이터 확인** \u2014 데이터 탭에서 파일을 확인할 수 있습니다
+3. **모델 학습** \u2014 데이터셋을 선택하면 자동으로 ML 학습을 시작합니다
+4. **리포트 확인** \u2014 생성된 분석 리포트를 확인할 수 있습니다
 
-\ubb34\uc5c7\uc744 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694?`,
-      features: `SHAP \ubcc0\uc218 \uae30\uc5ec\ub3c4 \ubd84\uc11d \uacb0\uacfc\uc785\ub2c8\ub2e4:
+무엇을 도와드릴까요?`,
+      features: `SHAP 변수 기여도 분석 결과입니다:
 
-\uc608\uce21\ub825 \uc0c1\uc704 5\uac1c \ubcc0\uc218:
-1. **brent_oil_price** (31.2%) \u2014 \ube0c\ub80c\ud2b8\uc720 \ud604\ubb3c\uac00\uaca9
-2. **jkm_spot_price** (24.3%) \u2014 JKM \ud604\ubb3c\uac00\uaca9
-3. **exchange_rate_krw** (11.8%) \u2014 \uc6d0/\ub2ec\ub7ec \ud658\uc728
-4. **ppi_index** (8.9%) \u2014 \uc0dd\uc0b0\uc790\ubb3c\uac00\uc9c0\uc218
-5. **heating_degree_days** (7.4%) \u2014 \ub09c\ubc29\ub3c4\uc77c
+예측력 상위 5개 변수:
+1. **brent_oil_price** (31.2%) \u2014 브렌트유 현물가격
+2. **jkm_spot_price** (24.3%) \u2014 JKM 현물가격
+3. **exchange_rate_krw** (11.8%) \u2014 원/달러 환율
+4. **ppi_index** (8.9%) \u2014 생산자물가지수
+5. **heating_degree_days** (7.4%) \u2014 난방도일
 
-\uc774 5\uac1c \ubcc0\uc218\uac00 \uc804\uccb4 \uc608\uce21\ub825\uc758 83.6%\ub97c \uc124\uba85\ud569\ub2c8\ub2e4.`,
+이 5개 변수가 전체 예측력의 83.6%를 설명합니다.`,
     };
 
-    const responseText = userMessage.toLowerCase().includes('feature') || userMessage.includes('\ubcc0\uc218')
+    const responseText = userMessage.toLowerCase().includes('feature') || userMessage.includes('변수')
       ? responses.features
       : responses.default;
 
     const messageId = `msg-${Date.now()}`;
-    const words = responseText.split(' ');
-
-    // Stream response word by word
-    for (let i = 0; i < words.length; i++) {
-      await this.delay(30 + Math.random() * 20);
-
-      this.emit({
-        type: 'message.received',
-        payload: {
-          sessionId,
-          messageId,
-          chunk: words[i] + (i < words.length - 1 ? ' ' : ''),
-          isComplete: false,
-        } as MessageReceivedPayload,
-      });
-    }
-
-    // Mark message as complete
-    this.emit({
-      type: 'message.complete',
-      payload: { sessionId, messageId },
-    });
+    await this.streamMessage(sessionId, messageId, responseText);
   }
 
   /**
@@ -353,7 +413,7 @@ class MockWebSocket {
     await this.streamMessage(
       sessionId,
       introMessageId,
-      '\ud30c\uc77c\uc744 \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4. \uc790\ub3d9 \ubd84\uc11d\uc744 \uc2dc\uc791\ud569\ub2c8\ub2e4.\n\n5\ub2e8\uacc4\ub85c \uc9c4\ud589\ub429\ub2c8\ub2e4:\n1. \ubb38\uc81c \uc815\uc758\n2. \uc120\ud589\uc5f0\uad6c\n3. \ubaa8\ub378 \ud559\uc2b5\n4. \uc778\uc0ac\uc774\ud2b8 \ub3c4\ucd9c\n5. \ub9ac\ud3ec\ud2b8 \uc0dd\uc131'
+      '파일을 확인했습니다. 자동 분석을 시작합니다.\n\n5단계로 진행됩니다:\n1. 문제 정의\n2. 선행연구\n3. 모델 학습\n4. 인사이트 도출\n5. 리포트 생성'
     );
 
     // Process each step
@@ -427,20 +487,20 @@ class MockWebSocket {
       await this.streamMessage(
         sessionId,
         resultsMessageId,
-        `## \ubd84\uc11d \uc644\ub8cc
+        `## 분석 완료
 
-**LightGBM** \ubaa8\ub378\uc774 \uac80\uc99d \ub370\uc774\ud130\uc5d0\uc11c **R\u00B2=0.946**\uc744 \ub2ec\uc131\ud588\uc2b5\ub2c8\ub2e4.
+**LightGBM** 모델이 검증 데이터에서 **R\u00B2=0.946**을 달성했습니다.
 
-### \ubaa8\ub378 \uc131\ub2a5
-| \uc9c0\ud45c | \uac12 |
+### 모델 성능
+| 지표 | 값 |
 |---|---:|
-| RMSE | 1.23 \uc6d0/MJ |
-| MAE | 0.87 \uc6d0/MJ |
+| RMSE | 1.23 원/MJ |
+| MAE | 0.87 원/MJ |
 | R\u00B2 | 0.946 |
 | MAPE | 4.2% |
 
-### SHAP \ubcc0\uc218 \uae30\uc5ec\ub3c4
-| \uc21c\uc704 | \ubcc0\uc218 | \uae30\uc5ec\ub3c4 |
+### SHAP 변수 기여도
+| 순위 | 변수 | 기여도 |
 |---:|---|---:|
 | 1 | brent_oil_price | 31.2% |
 | 2 | jkm_spot_price | 24.3% |
@@ -448,11 +508,11 @@ class MockWebSocket {
 | 4 | ppi_index | 8.9% |
 | 5 | heating_degree_days | 7.4% |
 
-### \uc8fc\uc694 \uc778\uc0ac\uc774\ud2b8
-- **\ube0c\ub80c\ud2b8\uc720 + JKM = 55.5%**: \uad6d\uc81c \uc5d0\ub108\uc9c0 \uac00\uaca9\uc774 \ub3c4\uc785 \uc6d0\uac00\uc758 \uc808\ubc18 \uc774\uc0c1\uc744 \uc124\uba85
-- **\ud658\uc728 \ube44\uc120\ud615 \ud6a8\uacfc**: 1,300\uc6d0 \uc774\uc0c1 \uad6c\uac04\uc5d0\uc11c SHAP \uae30\uc5ec\ub3c4 \uae09\uc99d
-- **\uacc4\uc808\uc131 7.4%**: \ub09c\ubc29\ub3c4\uc77c\uc744 \ud1b5\ud574 \ub3d9\uc808\uae30 \uc218\uc694 \uc99d\uac00\uac00 \uc6d0\uac00\uc5d0 \ubc18\uc601
-- **\uc7ac\uace0 \uc5ed\uad00\uacc4**: \uc7ac\uace0 5\ubc31\ub9cc\ud1a4 \uc774\ud558 \uc2dc \uac00\uaca9 \uc555\ub825 \ube44\ub840\uc801 \uc99d\uac00`
+### 주요 인사이트
+- **브렌트유 + JKM = 55.5%**: 국제 에너지 가격이 도입 원가의 절반 이상을 설명
+- **환율 비선형 효과**: 1,300원 이상 구간에서 SHAP 기여도 급증
+- **계절성 7.4%**: 난방도일을 통해 동절기 수요 증가가 원가에 반영
+- **재고 역관계**: 재고 5백만톤 이하 시 가격 압력 비례적 증가`
       );
 
       // Emit report.ready event
@@ -461,10 +521,12 @@ class MockWebSocket {
         type: 'report.ready',
         payload: {
           sessionId,
-          title: '\uad6d\ub0b4 \uac00\uc2a4 \ub3c4\uc785 \uc6d0\uac00 \uc608\uce21 \ubd84\uc11d \ub9ac\ud3ec\ud2b8',
-          preview: `# \uad6d\ub0b4 \uac00\uc2a4 \ub3c4\uc785 \uc6d0\uac00 \uc608\uce21 \ubd84\uc11d \ub9ac\ud3ec\ud2b8\n\n## \uc694\uc57d\nLightGBM \ubaa8\ub378\uc774 R\u00B2=0.946\uc758 \ub192\uc740 \uc608\uce21 \uc815\ud655\ub3c4\ub97c \ub2ec\uc131\ud588\uc2b5\ub2c8\ub2e4.\n\n## \uc8fc\uc694 \ubc1c\uacac\n- \ube0c\ub80c\ud2b8\uc720(31.2%)\uc640 JKM(24.3%)\uc774 \uc804\uccb4 \uc608\uce21\ub825\uc758 55% \uc810\uc720\n- \ud658\uc728 1,300\uc6d0 \ub3cc\ud30c \uc2dc \uc6d0\uac00 \ubbfc\uac10\ub3c4 \uae09\uc99d\n- \ub3d9\uc808\uae30 \ub09c\ubc29 \uc218\uc694\uac00 \uc6d0\uac00\uc5d0 7.4% \uae30\uc5ec\n\n## \ubaa8\ub378 \uc131\ub2a5\n- RMSE: 1.23 \uc6d0/MJ\n- MAE: 0.87 \uc6d0/MJ\n- R\u00B2: 0.946`,
+          title: '국내 가스 도입 원가 예측 분석 리포트',
+          preview: `# 국내 가스 도입 원가 예측 분석 리포트\n\n## 요약\nLightGBM 모델이 R\u00B2=0.946의 높은 예측 정확도를 달성했습니다.\n\n## 주요 발견\n- 브렌트유(31.2%)와 JKM(24.3%)이 전체 예측력의 55% 점유\n- 환율 1,300원 돌파 시 원가 민감도 급증\n- 동절기 난방 수요가 원가에 7.4% 기여\n\n## 모델 성능\n- RMSE: 1.23 원/MJ\n- MAE: 0.87 원/MJ\n- R\u00B2: 0.946`,
         },
       });
+
+      this.conversationState = 'complete';
     }
 
     this.isRunning = false;
@@ -492,19 +554,40 @@ class MockWebSocket {
     };
   }
 
-  private async streamMessage(sessionId: string, messageId: string, text: string): Promise<void> {
+  /**
+   * Streams a message word by word with optional thinking delay.
+   * RC12: Paragraph breaks (\n\n) get a slightly longer delay for natural pacing.
+   */
+  private async streamMessage(
+    sessionId: string,
+    messageId: string,
+    text: string,
+    thinkingDelay = 0,
+  ): Promise<void> {
+    // Temporarily enable isRunning for streaming (some callers need it)
+    const wasRunning = this.isRunning;
+    this.isRunning = true;
+
+    if (thinkingDelay > 0) {
+      await this.delay(thinkingDelay);
+    }
+
     const words = text.split(' ');
 
     for (let i = 0; i < words.length; i++) {
       if (!this.isRunning) break;
-      await this.delay(25 + Math.random() * 15);
+
+      // Slightly longer delay after paragraph breaks
+      const word = words[i];
+      const isParagraphBreak = word.includes('\n\n');
+      await this.delay(isParagraphBreak ? 60 + Math.random() * 20 : 25 + Math.random() * 15);
 
       this.emit({
         type: 'message.received',
         payload: {
           sessionId,
           messageId,
-          chunk: words[i] + (i < words.length - 1 ? ' ' : ''),
+          chunk: word + (i < words.length - 1 ? ' ' : ''),
           isComplete: false,
         } as MessageReceivedPayload,
       });
@@ -514,6 +597,9 @@ class MockWebSocket {
       type: 'message.complete',
       payload: { sessionId, messageId },
     });
+
+    // Restore previous running state
+    this.isRunning = wasRunning;
   }
 
   stopAnalysis(): void {
