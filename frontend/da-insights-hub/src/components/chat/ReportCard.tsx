@@ -21,8 +21,11 @@ export function ReportCardInline({ data }: ReportCardInlineProps) {
   };
 
   const handleViewHtml = () => {
-    const baseUrl = config.useMock ? '' : '/api/v1';
-    window.open(`${baseUrl}/reports/${sessionId}/html`, '_blank');
+    if (config.useMock) {
+      window.open('/mock/lpg-report.html', '_blank');
+    } else {
+      window.open(`/api/v1/reports/${sessionId}/html`, '_blank');
+    }
   };
 
   const handleDownload = () => {

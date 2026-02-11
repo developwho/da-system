@@ -109,6 +109,7 @@ function PhaseSection({ phase, items }: { phase: string; items: SubStep[] }) {
   const hasRunning = items.some((s) => s.status === 'running');
   const [isOpen, setIsOpen] = useState(hasRunning);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const seenIds = useRef<Set<string>>(new Set());
 
   // Auto-open when phase becomes active, auto-close when completed
   useEffect(() => {
@@ -146,13 +147,15 @@ function PhaseSection({ phase, items }: { phase: string; items: SubStep[] }) {
       {isOpen && (
         <div
           ref={scrollRef}
-          className="mt-1 ml-3 max-h-28 overflow-y-scroll substep-log-scroll space-y-0.5 pr-1"
+          className="mt-1 ml-3 max-h-48 overflow-y-auto substep-log-scroll space-y-0.5 pr-1"
         >
-          {items.map((sub, i) => (
+          {items.map((sub) => {
+            const isNew = !seenIds.current.has(sub.id);
+            if (isNew) seenIds.current.add(sub.id);
+            return (
             <div
               key={sub.id}
-              className="flex items-start gap-1.5 text-xs animate-in fade-in duration-300"
-              style={{ animationDelay: `${i * 30}ms` }}
+              className={`flex items-start gap-1.5 text-xs ${isNew ? 'animate-in fade-in duration-300' : ''}`}
             >
               <span className="mt-0.5 flex-shrink-0 w-3 text-center">
                 <SubStepIcon status={sub.status} />
@@ -171,7 +174,8 @@ function PhaseSection({ phase, items }: { phase: string; items: SubStep[] }) {
                 {sub.label}
               </span>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

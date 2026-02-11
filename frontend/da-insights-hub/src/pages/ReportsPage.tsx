@@ -141,7 +141,11 @@ export default function ReportsPage() {
                               title="HTML 리포트 보기"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(`${config.apiBaseUrl}/reports/${report.sessionId}/html`, '_blank');
+                                if (config.useMock) {
+                                  window.open('/mock/lpg-report.html', '_blank');
+                                } else {
+                                  window.open(`${config.apiBaseUrl}/reports/${report.sessionId}/html`, '_blank');
+                                }
                               }}
                             >
                               <ExternalLink className="h-4 w-4 text-muted-foreground" />

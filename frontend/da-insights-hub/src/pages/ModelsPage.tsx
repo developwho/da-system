@@ -28,6 +28,7 @@ const RATIO_METRICS = new Set([
 
 function formatMetric(key: string, value: unknown): string | null {
   if (value == null || typeof value !== 'number') return null;
+  if (key === 'mape') return value.toFixed(2) + '%';
   if (RATIO_METRICS.has(key)) {
     return (value * 100).toFixed(2) + '%';
   }
@@ -229,6 +230,30 @@ function ModelCard({ model }: { model: Model }) {
                 <p className="text-xs text-muted-foreground">F1 Score</p>
                 <p className="text-lg font-semibold">
                   {(model.metrics.f1Score * 100).toFixed(1)}%
+                </p>
+              </div>
+            )}
+            {model.metrics.r2 != null && (
+              <div>
+                <p className="text-xs text-muted-foreground">R²</p>
+                <p className="text-lg font-semibold text-da-success">
+                  {(model.metrics.r2 * 100).toFixed(1)}%
+                </p>
+              </div>
+            )}
+            {model.metrics.mape != null && (
+              <div>
+                <p className="text-xs text-muted-foreground">MAPE</p>
+                <p className="text-lg font-semibold">
+                  {model.metrics.mape.toFixed(1)}%
+                </p>
+              </div>
+            )}
+            {model.metrics.rmse != null && (
+              <div>
+                <p className="text-xs text-muted-foreground">RMSE</p>
+                <p className="text-lg font-semibold">
+                  {model.metrics.rmse.toFixed(2)}
                 </p>
               </div>
             )}

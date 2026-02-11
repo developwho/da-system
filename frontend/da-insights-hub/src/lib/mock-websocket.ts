@@ -17,8 +17,8 @@ import {
 } from './mock-data';
 
 const MOCK_DESCRIPTIONS: Record<number, string> = {
-  1: '에너지 가격 데이터를 분석하고 예측 문제를 정의하고 있습니다...',
-  2: '에너지 가격 예측 관련 논문과 Kaggle 솔루션을 조사하고 있습니다...',
+  1: 'LPG/도시가스 가격 데이터를 분석하고 예측 문제를 정의하고 있습니다...',
+  2: 'LPG 가격 예측 관련 논문과 Kaggle 솔루션을 조사하고 있습니다...',
   3: 'FLAML AutoML로 최적 예측 모델을 탐색하고 학습하고 있습니다...',
   4: 'SHAP 분석으로 변수별 기여도를 산출하고 인사이트를 도출하고 있습니다...',
   5: '종합 분석 리포트를 작성하고 있습니다...',
@@ -26,25 +26,25 @@ const MOCK_DESCRIPTIONS: Record<number, string> = {
 
 const MOCK_SUB_STEPS: Record<number, string[]> = {
   1: [
-    '분석 목표 확인: 국내 가스 도입 원가 예측',
+    '분석 목표 확인: LPG/도시가스 판매 단가 예측',
   ],
   2: [
     '병렬 선행연구 시작',
-    '검색 쿼리: "energy price forecasting LNG"',
+    '검색 쿼리: "LPG price forecasting CP JKM"',
     '관련 논문 3건 검색 완료',
-    'Kaggle 에너지 가격 솔루션 분석 완료',
+    'Kaggle LPG 가격 솔루션 분석 완료',
     'DeepResearch 조사 시작',
-    'DeepResearch: LNG 가격 결정 메커니즘 분석 완료',
+    'DeepResearch: LPG/CP 가격 결정 메커니즘 분석 완료',
   ],
   3: [
-    '94행 x 12열 데이터 로딩 완료',
+    '80행 x 8열 데이터 로딩 완료',
     'FLAML AutoML 실행 중... LightGBM vs XGBoost 비교',
-    '최적 모델 학습 완료 (LightGBM, R\u00B2=0.946)',
+    '최적 모델 학습 완료 (LightGBM, R\u00B2=0.94)',
   ],
   4: [
     '학습된 LightGBM 모델 로딩 완료',
     'SHAP TreeExplainer 분석 시작',
-    'SHAP 분석 완료 \u2014 브렌트유(31.2%), JKM(24.3%) 상위 확인',
+    'SHAP 분석 완료 \u2014 cp_price(38.2%), jkm_price(27.1%) 상위 확인',
   ],
   5: [
     '마크다운 리포트 생성 중 (8개 섹션)',
@@ -60,7 +60,7 @@ const STEP_TO_PHASE: Record<number, string> = {
 };
 
 /** Keywords that trigger the energy domain intent response */
-const ENERGY_KEYWORDS = ['에너지', '가격', '예측', '가스', '도시가스', '원가', 'lng', '브렌트', 'jkm', '전력', '전기'];
+const ENERGY_KEYWORDS = ['에너지', '가격', '예측', '가스', '도시가스', '원가', 'lng', '브렌트', 'jkm', '전력', '전기', 'lpg', 'cp'];
 
 type ConversationPhase = 'idle' | 'intent_shared' | 'file_uploaded' | 'analyzing' | 'complete';
 type EventCallback = (event: WebSocketEvent) => void;
@@ -153,29 +153,29 @@ class MockWebSocket {
     if (!this.currentSessionId) return;
     this.lastAnswers = answers;
 
-    await this.delay(500);
+    await this.delay(200);
 
     // Build analysis goal with conversation context
-    const defaultGoal = '국내 가스 도입 원가 예측 모델 구축 및 주요 영향 요인 분석';
+    const defaultGoal = 'LPG/도시가스 판매 단가 예측 모델 구축 및 주요 영향 요인 분석';
     const contextualGoal = this.userIntent
-      ? '말씀하신 도시가스 가격 예측을 위한 최적 모델 구축 및 주요 영향 요인 정량 분석'
+      ? '말씀하신 LPG/도시가스 가격 예측을 위한 최적 모델 구축 및 주요 영향 요인 정량 분석'
       : defaultGoal;
 
     const plan: AnalysisPlanPayload = {
       sessionId: this.currentSessionId,
       plan: {
         analysisGoal: answers.goal || contextualGoal,
-        targetColumn: answers.target || 'domestic_gas_price',
+        targetColumn: answers.target || 'lpg_retail_price',
         problemType: answers.problem_type || 'regression',
         evaluationMetric: answers.metric || 'rmse',
         constraints: [
-          '월별 데이터 (94개월, 2018-01 ~ 2025-10)',
-          '최근 2년 데이터 검증 필요',
+          '월별 데이터 (80개월, 2018-03 ~ 2024-10)',
+          '80:20 홀드아웃 검증',
         ],
         estimatedDuration: '15~20분',
         steps: [
-          { name: '문제 정의', description: '가스 도입 원가 예측을 위한 타겟 변수 및 평가 지표 확정' },
-          { name: '선행연구', description: '에너지 가격 예측 관련 논문 및 Kaggle 솔루션 조사' },
+          { name: '문제 정의', description: 'LPG 판매 단가 예측을 위한 타겟 변수 및 평가 지표 확정' },
+          { name: '선행연구', description: 'LPG/에너지 가격 예측 관련 논문 및 Kaggle 솔루션 조사' },
           { name: '모델 학습', description: 'FLAML AutoML로 LightGBM/XGBoost 등 최적 모델 탐색' },
           { name: '인사이트', description: 'SHAP 기반 변수별 기여도 분석 및 비즈니스 해석' },
           { name: '리포트', description: '경영진 요약, SHAP 드라이버, 권고사항 포함 종합 보고서 생성' },
@@ -231,7 +231,7 @@ class MockWebSocket {
     await this.streamMessage(sessionId, messageId, responseText, 2000);
 
     // After data analysis response, transition to Q&A
-    await this.delay(1000);
+    await this.delay(300);
     await this.simulateQuestions(sessionId);
   }
 
@@ -251,18 +251,17 @@ class MockWebSocket {
     const questionsPayload: AnalysisQuestionsPayload = {
       sessionId,
       profile: {
-        rows: 94,
-        columns: 12,
+        rows: 80,
+        columns: 8,
         numericColumns: [
-          'brent_oil_price', 'jkm_spot_price', 'exchange_rate_krw',
-          'ppi_index', 'heating_degree_days', 'lng_import_volume',
-          'gas_inventory', 'power_consumption', 'cpi_index',
-          'lng_import_price', 'crude_import',
+          'cp_price', 'jkm_price', 'brent_crude',
+          'heating_demand_idx', 'usd_krw', 'inventory_level',
+          'lpg_retail_price',
         ],
-        categoricalColumns: [],
+        categoricalColumns: ['season'],
         missingCellsPct: 0.0,
         duplicateRows: 0,
-        memoryMB: 0.1,
+        memoryMB: 0.05,
       },
       questions: [
         {
@@ -273,11 +272,11 @@ class MockWebSocket {
             ? '말씀하신 가격 예측 목표에 맞춰 타겟 변수를 추천합니다.'
             : '모델이 예측할 대상 컬럼을 선택하세요.',
           required: true,
-          defaultValue: 'domestic_gas_price',
+          defaultValue: 'lpg_retail_price',
           options: [
-            { value: 'domestic_gas_price', label: 'domestic_gas_price', recommended: true, reason: '연속형 변수, 국내 가스 도입 원가 (원/MJ)' },
-            { value: 'brent_oil_price', label: 'brent_oil_price' },
-            { value: 'jkm_spot_price', label: 'jkm_spot_price' },
+            { value: 'lpg_retail_price', label: 'lpg_retail_price', recommended: true, reason: '연속형 변수, LPG 판매 단가 (원/kg)' },
+            { value: 'cp_price', label: 'cp_price' },
+            { value: 'jkm_price', label: 'jkm_price' },
           ],
         },
         {
@@ -288,7 +287,7 @@ class MockWebSocket {
           required: true,
           defaultValue: 'regression',
           options: [
-            { value: 'regression', label: '회귀', recommended: true, reason: '타겟이 연속형 수치 (원/MJ)' },
+            { value: 'regression', label: '회귀', recommended: true, reason: '타겟이 연속형 수치 (원/kg)' },
             { value: 'time_series', label: '시계열 예측' },
           ],
         },
@@ -311,8 +310,8 @@ class MockWebSocket {
           label: '분석 목표 (선택사항)',
           description: '분석의 비즈니스 목표를 간단히 설명해주세요.',
           placeholder: this.userIntent
-            ? '도시가스 도입 원가를 예측하여 매입 시점 최적화에 활용'
-            : '향후 가스 도입 원가를 예측하여 영업 의사결정에 활용',
+            ? 'LPG/도시가스 판매 단가를 예측하여 CP 계약 타이밍 최적화에 활용'
+            : 'LPG 판매 단가를 예측하여 영업 의사결정에 활용',
           required: false,
         },
       ],
@@ -360,6 +359,9 @@ class MockWebSocket {
   /**
    * Builds accumulated subSteps for a given step and progress
    */
+  /** Stable timestamps for completed substeps — avoids re-render from Date.now() */
+  private subStepTimestamps = new Map<string, number>();
+
   private buildSubSteps(stepIndex: number, progressRatio: number, completedSteps: number[]): SubStep[] {
     const allSubSteps: SubStep[] = [];
 
@@ -368,11 +370,15 @@ class MockWebSocket {
       const labels = MOCK_SUB_STEPS[prevStep] || [];
       const phase = STEP_TO_PHASE[prevStep] || 'Unknown';
       for (let j = 0; j < labels.length; j++) {
+        const id = `sub-${prevStep}-${j}`;
+        if (!this.subStepTimestamps.has(id)) {
+          this.subStepTimestamps.set(id, Date.now());
+        }
         allSubSteps.push({
-          id: `sub-${prevStep}-${j}`,
+          id,
           label: labels[j],
           status: 'complete',
-          timestamp: Date.now(),
+          timestamp: this.subStepTimestamps.get(id)!,
           phase,
         });
       }
@@ -385,11 +391,15 @@ class MockWebSocket {
     const visibleCount = Math.ceil(progressRatio * currentLabels.length);
     for (let j = 0; j < visibleCount; j++) {
       const isLast = j === visibleCount - 1 && progressRatio < 1;
+      const id = `sub-${currentStepNum}-${j}`;
+      if (!this.subStepTimestamps.has(id)) {
+        this.subStepTimestamps.set(id, Date.now());
+      }
       allSubSteps.push({
-        id: `sub-${currentStepNum}-${j}`,
+        id,
         label: currentLabels[j],
         status: isLast ? 'running' : 'complete',
-        timestamp: Date.now(),
+        timestamp: this.subStepTimestamps.get(id)!,
         phase: currentPhase,
       });
     }
@@ -405,7 +415,7 @@ class MockWebSocket {
     this.abortController = new AbortController();
 
     const steps = JSON.parse(JSON.stringify(analysisStepsTemplate)) as AnalysisStep[];
-    const stepDurations = [2000, 3000, 8000, 5000, 2000]; // ms per step (모델링 8초로 캡처 여유)
+    const stepDurations = [1500, 2000, 4000, 2500, 1500]; // ms per step (총 11.5초로 압축)
     const completedStepNumbers: number[] = [];
 
     // Initial message
@@ -438,7 +448,7 @@ class MockWebSocket {
       });
 
       // Simulate progress within step
-      const progressSteps = 10;
+      const progressSteps = 25;
       for (let p = 1; p <= progressSteps; p++) {
         if (!this.isRunning) break;
         await this.delay(stepDurations[i] / progressSteps);
@@ -489,30 +499,31 @@ class MockWebSocket {
         resultsMessageId,
         `## 분석 완료
 
-**LightGBM** 모델이 검증 데이터에서 **R\u00B2=0.946**을 달성했습니다.
+**LightGBM** 모델이 검증 데이터에서 **R\u00B2=0.94, MAPE=4.8%**를 달성했습니다.
 
 ### 모델 성능
 | 지표 | 값 |
 |---|---:|
-| RMSE | 1.23 원/MJ |
-| MAE | 0.87 원/MJ |
-| R\u00B2 | 0.946 |
-| MAPE | 4.2% |
+| R\u00B2 | 0.94 |
+| MAPE | 4.8% |
+| RMSE | 1.18 원/kg |
+| MAE | 0.82 원/kg |
 
 ### SHAP 변수 기여도
 | 순위 | 변수 | 기여도 |
 |---:|---|---:|
-| 1 | brent_oil_price | 31.2% |
-| 2 | jkm_spot_price | 24.3% |
-| 3 | exchange_rate_krw | 11.8% |
-| 4 | ppi_index | 8.9% |
-| 5 | heating_degree_days | 7.4% |
+| 1 | cp_price | 38.2% |
+| 2 | jkm_price | 27.1% |
+| 3 | brent_crude | 15.8% |
+| 4 | heating_demand_idx | 9.3% |
+| 5 | usd_krw | 5.7% |
+| 6 | season | 3.9% |
 
 ### 주요 인사이트
-- **브렌트유 + JKM = 55.5%**: 국제 에너지 가격이 도입 원가의 절반 이상을 설명
-- **환율 비선형 효과**: 1,300원 이상 구간에서 SHAP 기여도 급증
-- **계절성 7.4%**: 난방도일을 통해 동절기 수요 증가가 원가에 반영
-- **재고 역관계**: 재고 5백만톤 이하 시 가격 압력 비례적 증가`
+- **CP + JKM + 유가 = 81.1%**: 국제 에너지 가격 3개 변수가 판매가의 대부분을 설명
+- **환율 비선형 효과**: 1,350원 이상 구간에서 SHAP 기여도 급증
+- **계절성 13.2%**: 난방 수요 + 계절 변수가 동절기 가격 프리미엄을 포착
+- **CP 가격 지배적**: 사우디 아람코 CP가 단일 변수 최고 설명력(38.2%)`
       );
 
       // Emit report.ready event
@@ -521,8 +532,8 @@ class MockWebSocket {
         type: 'report.ready',
         payload: {
           sessionId,
-          title: '국내 가스 도입 원가 예측 분석 리포트',
-          preview: `# 국내 가스 도입 원가 예측 분석 리포트\n\n## 요약\nLightGBM 모델이 R\u00B2=0.946의 높은 예측 정확도를 달성했습니다.\n\n## 주요 발견\n- 브렌트유(31.2%)와 JKM(24.3%)이 전체 예측력의 55% 점유\n- 환율 1,300원 돌파 시 원가 민감도 급증\n- 동절기 난방 수요가 원가에 7.4% 기여\n\n## 모델 성능\n- RMSE: 1.23 원/MJ\n- MAE: 0.87 원/MJ\n- R\u00B2: 0.946`,
+          title: 'LPG/도시가스 가격 예측 분석 리포트',
+          preview: `# LPG/도시가스 가격 예측 분석 리포트\n\n## 요약\nLightGBM 모델이 R\u00B2=0.94, MAPE=4.8%의 높은 예측 정확도를 달성했습니다.\n\n## 주요 발견\n- CP(38.2%), JKM(27.1%), 유가(15.8%)가 전체 예측력의 81.1% 점유\n- 환율 1,350원 돌파 시 판매가 민감도 급증\n- 동절기 난방 수요가 가격에 13.2% 기여\n\n## 모델 성능\n- R\u00B2: 0.94\n- MAPE: 4.8%\n- RMSE: 1.18 원/kg`,
         },
       });
 

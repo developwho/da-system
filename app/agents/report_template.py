@@ -12,6 +12,44 @@ from datetime import datetime
 import html as html_mod
 
 
+METRIC_DESCRIPTIONS = {
+    "accuracy": "전체 예측 중 정답 비율",
+    "f1": "Precision과 Recall의 조화 평균 (불균형 데이터에 유용)",
+    "precision": "양성 예측 중 실제 양성 비율",
+    "recall": "실제 양성 중 모델이 찾아낸 비율",
+    "roc_auc": "모든 임계값에서 양성/음성 구분 능력",
+    "rmse": "예측 오차의 표준편차 (낮을수록 좋음)",
+    "mae": "예측 오차의 평균 절대값 (낮을수록 좋음)",
+    "r2": "모델이 설명하는 데이터 변동 비율 (1에 가까울수록 좋음)",
+    "mse": "예측 오차의 제곱 평균 (낮을수록 좋음)",
+    "log_loss": "확률 예측의 정확도 (낮을수록 좋음)",
+    "mape": "예측 오차의 백분율 평균 (낮을수록 좋음)",
+}
+
+FIGURE_INTERPRETATIONS = {
+    "shap_bar": "각 변수가 모델 예측에 기여하는 평균 영향력을 보여줍니다. 막대가 길수록 해당 변수가 예측에 더 큰 영향을 미칩니다.",
+    "shap_summary": "각 데이터 포인트에서 변수들이 예측을 어떻게 밀어내는지 보여줍니다. 빨간 점은 높은 값, 파란 점은 낮은 값을 의미합니다.",
+    "shap_waterfall": "하나의 개별 예측이 어떻게 만들어졌는지 분해합니다. 빨간 막대는 예측을 높이고, 파란 막대는 낮춥니다.",
+    "shap_beeswarm": "각 데이터 포인트에서 변수들이 예측을 어떻게 밀어내는지 보여줍니다. 빨간 점은 높은 값, 파란 점은 낮은 값을 의미합니다.",
+}
+
+STEP_LABELS = {
+    "datetime": "DateTime 변환",
+    "outlier": "이상치 처리",
+    "encoding": "변수 인코딩",
+    "label": "라벨 인코딩",
+    "missing": "결측값 처리",
+    "variance": "저분산 제거",
+    "stratif": "층화 분할",
+    "sample_weight": "가중치 적용",
+    "scale": "스케일링",
+    "one-hot": "원핫 인코딩",
+    "clipping": "이상치 클리핑",
+    "fillna": "결측값 처리",
+    "imput": "결측값 대체",
+}
+
+
 class McKinseyReportTemplate:
     """Generates a McKinsey-style HTML report from analysis data."""
 
@@ -27,16 +65,22 @@ class McKinseyReportTemplate:
         self.session_id = report_data.get("session_id", "N/A")
         self.timestamp = report_data.get("timestamp", datetime.now().isoformat())
 
-    def render(self, executive_summary: str = "", shap_images: Optional[List[Dict]] = None) -> str:
+    def render(
+        self,
+        executive_summary: str = "",
+        shap_images: Optional[List[Dict]] = None,
+        feature_importance: Optional[List[Dict]] = None,
+    ) -> str:
         """Render the full HTML report."""
         shap_images = shap_images or []
+        feature_importance = feature_importance or []
         sections = [
             self._executive_summary_section(executive_summary),
             self._problem_definition_section(),
             self._data_overview_section(),
             self._research_findings_section(),
             self._modeling_results_section(),
-            self._shap_section(shap_images),
+            self._shap_section(shap_images, feature_importance),
             self._key_insights_section(),
             self._recommendations_section(),
             self._appendix_section(),
@@ -302,6 +346,34 @@ class McKinseyReportTemplate:
         margin-bottom: 4px;
     }
 
+    /* ── KPI Hint ── */
+    .kpi-hint {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.3;
+    }
+
+    /* ── Preprocessing Badges ── */
+    .prep-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+    }
+    .prep-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 12px;
+        font-size: 12px;
+        font-weight: 500;
+        background: #F0FDF4;
+        color: #166534;
+        border-radius: 100px;
+        border: 1px solid #BBF7D0;
+    }
+
     /* ── Figure ── */
     .figure {
         margin: 24px 0;
@@ -330,6 +402,20 @@ class McKinseyReportTemplate:
         color: var(--muted);
         font-style: italic;
         margin-top: 8px;
+    }
+    .figure-interp {
+        font-size: 13px;
+        color: var(--body);
+        margin-top: 10px;
+        line-height: 1.6;
+        padding: 10px 14px;
+        background: var(--bg-subtle);
+        border-radius: 6px;
+    }
+    .figure-interp .top-features {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
     }
 
     /* ── Recommendation Card ── */
@@ -479,11 +565,13 @@ class McKinseyReportTemplate:
     def _section_close() -> str:
         return "        </div>"
 
-    def _kpi_card(self, label: str, value: str, color: str = "") -> str:
+    def _kpi_card(self, label: str, value: str, color: str = "", hint: str = "") -> str:
         cls = f" {color}" if color else ""
+        hint_html = f'<div class="kpi-hint">{self._esc(hint)}</div>' if hint else ""
         return f"""<div class="kpi-card">
                 <div class="kpi-label">{self._esc(label)}</div>
                 <div class="kpi-value{cls}">{self._esc(value)}</div>
+                {hint_html}
             </div>"""
 
     def _kpi_grid(self, cards: List[str]) -> str:
@@ -527,10 +615,11 @@ class McKinseyReportTemplate:
             cards = []
             for key, value in metrics.items():
                 if isinstance(value, (int, float)):
-                    display = f"{value:.1%}" if value <= 1 else f"{value:.2f}"
+                    display = f"{value:.1%}" if value <= 1 else f"{value:,.2f}"
                     color = self._metric_color(value)
                     label = key.upper().replace("_", " ")
-                    cards.append(self._kpi_card(label, display, color))
+                    hint = METRIC_DESCRIPTIONS.get(key.lower(), "")
+                    cards.append(self._kpi_card(label, display, color, hint))
             if cards:
                 parts.append(self._kpi_grid(cards[:6]))
 
@@ -627,13 +716,12 @@ class McKinseyReportTemplate:
                 parts.append(self._callout(w, "warning"))
             has_content = True
 
-        # Preprocessing steps
+        # Preprocessing steps — compact badge layout
         if self.preprocessing_log:
-            parts.append('<div class="prose"><p><strong>Applied Preprocessing Steps:</strong></p><ul>')
-            for step in self.preprocessing_log:
-                parts.append(f"<li>{self._esc(step)}</li>")
-            parts.append("</ul></div>")
-            has_content = True
+            badges_html = self._compact_preprocessing(self.preprocessing_log)
+            if badges_html:
+                parts.append(f'<div class="prose"><p><strong>Applied Preprocessing:</strong></p>{badges_html}</div>')
+                has_content = True
 
         if not has_content:
             parts.append('<div class="prose"><p>No data quality analysis available.</p></div>')
@@ -739,19 +827,50 @@ class McKinseyReportTemplate:
 
     # ── Section 06: SHAP Analysis ────────────────────────────────────
 
-    def _shap_section(self, images: List[Dict]) -> str:
+    def _shap_section(self, images: List[Dict], feature_importance: Optional[List[Dict]] = None) -> str:
+        feature_importance = feature_importance or []
         parts = [self._section_header(6, "Feature Importance (SHAP)")]
+
+        # Extract top-3 feature names
+        top_features = []
+        if feature_importance:
+            sorted_fi = sorted(feature_importance, key=lambda x: abs(x.get("importance", 0)), reverse=True)
+            top_features = [f.get("feature", f.get("name", "")) for f in sorted_fi[:3] if f.get("feature") or f.get("name")]
 
         if images:
             for i, img in enumerate(images[:4], 1):
-                label = img.get("filename", "").replace("_", " ").replace(".png", "").title()
+                filename = img.get("filename", "")
+                label = filename.replace("_", " ").replace(".png", "").title()
                 caption = f"Figure {i}. {label}" if label else f"Figure {i}. SHAP Analysis"
-                parts.append(self._figure(img["data_uri"], caption))
+                parts.append(self._figure_with_interp(img["data_uri"], caption, filename, top_features))
         else:
             parts.append(self._callout("SHAP analysis plots are not available for this session.", "info"))
 
         parts.append(self._section_close())
         return "\n".join(parts)
+
+    def _figure_with_interp(self, img_uri: str, caption: str, filename: str, top_features: List[str]) -> str:
+        """Figure with auto-interpretation text."""
+        # Match filename to interpretation
+        interp = ""
+        fname_lower = filename.lower()
+        for key, text in FIGURE_INTERPRETATIONS.items():
+            if key in fname_lower:
+                interp = text
+                break
+
+        interp_html = ""
+        if interp:
+            top_html = ""
+            if top_features and ("bar" in fname_lower or "summary" in fname_lower or "beeswarm" in fname_lower):
+                top_html = f'<div class="top-features">상위 변수: {", ".join(self._esc(f) for f in top_features)}</div>'
+            interp_html = f'<div class="figure-interp">{self._esc(interp)}{top_html}</div>'
+
+        return f"""<div class="figure">
+            <div class="figure-caption">{self._esc(caption)}</div>
+            <div class="figure-frame"><img src="{img_uri}" alt="{self._esc(caption)}"></div>
+            {interp_html}
+        </div>"""
 
     # ── Section 07: Key Insights ─────────────────────────────────────
 
@@ -858,6 +977,30 @@ class McKinseyReportTemplate:
 
         parts.append(self._section_close())
         return "\n".join(parts)
+
+    # ── Compact Preprocessing ─────────────────────────────────────────
+
+    @staticmethod
+    def _compact_preprocessing(steps: List[str]) -> str:
+        """Convert verbose preprocessing log into compact badges (max 5)."""
+        matched = []
+        seen_labels = set()
+        for step in steps:
+            step_lower = step.lower()
+            for keyword, label in STEP_LABELS.items():
+                if keyword in step_lower and label not in seen_labels:
+                    matched.append(label)
+                    seen_labels.add(label)
+                    break
+        if not matched:
+            # Fallback: show first 5 steps truncated
+            matched = [s[:30] for s in steps[:5]]
+
+        badges = "".join(
+            f'<span class="prep-badge">{html_mod.escape(label)}</span>'
+            for label in matched[:5]
+        )
+        return f'<div class="prep-badges">{badges}</div>'
 
     # ── Footer ───────────────────────────────────────────────────────
 

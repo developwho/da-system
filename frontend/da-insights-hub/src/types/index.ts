@@ -223,6 +223,7 @@ export interface ModelMetrics {
   rmse?: number;
   mae?: number;
   r2?: number;
+  mape?: number;
 }
 
 export interface FeatureImportance {

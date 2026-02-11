@@ -370,16 +370,13 @@ class OrchestratorAgent(BaseAgent):
     })
 
     def _persist_context(self) -> None:
-        """현재 컨텍스트를 세션 스토어에 저장 (비직렬화 객체 제거)"""
+        """현재 컨텍스트를 세션 스토어에 저장 (비직렬화 객체 재귀 제거)"""
         try:
             data_copy = dict(self.context.data)
-            # model_data에서 비직렬화 키 제거 (원본은 메모리에서 유지)
+            # model_data, modeling 키에서 비직렬화 객체 재귀 제거
             for key in ("model_data", "modeling"):
                 if key in data_copy and isinstance(data_copy[key], dict):
-                    data_copy[key] = {
-                        k: v for k, v in data_copy[key].items()
-                        if k not in self._NON_SERIALIZABLE_KEYS
-                    }
+                    data_copy[key] = self._strip_non_serializable(data_copy[key])
             session_store = get_session_store()
             session_store.update_context(
                 self.context.session_id,
@@ -387,3 +384,32 @@ class OrchestratorAgent(BaseAgent):
             )
         except Exception as exc:
             self.logger.warning("context_persist_failed", error=str(exc))
+
+    @classmethod
+    def _strip_non_serializable(cls, d: dict) -> dict:
+        """딕셔너리에서 비직렬화 객체를 재귀적으로 제거"""
+        cleaned = {}
+        for k, v in d.items():
+            if k in cls._NON_SERIALIZABLE_KEYS:
+                continue
+            if isinstance(v, dict):
+                cleaned[k] = cls._strip_non_serializable(v)
+            elif isinstance(v, (str, int, float, bool, type(None))):
+                cleaned[k] = v
+            elif isinstance(v, list):
+                cleaned[k] = cls._strip_list(v)
+            # numpy/pandas/model objects are silently skipped
+        return cleaned
+
+    @classmethod
+    def _strip_list(cls, lst: list) -> list:
+        """리스트에서 직렬화 가능한 항목만 유지"""
+        result = []
+        for item in lst:
+            if isinstance(item, (str, int, float, bool, type(None))):
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(cls._strip_non_serializable(item))
+            elif isinstance(item, list):
+                result.append(cls._strip_list(item))
+        return result

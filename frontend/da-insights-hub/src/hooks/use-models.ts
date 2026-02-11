@@ -10,9 +10,10 @@ export function useModels(experimentName?: string) {
     queryKey: ['models', experimentName],
     queryFn: async () => {
       if (config.useMock) {
-        // Mock 모드에서도 experimentName으로 필터링
+        // Mock 모드: sessionId 기반 필터링
         if (experimentName) {
-          return mockModels.filter((m) => m.experimentName === experimentName);
+          const sid = experimentName.replace('session_', '');
+          return mockModels.filter((m) => m.sessionId === sid);
         }
         return mockModels;
       }

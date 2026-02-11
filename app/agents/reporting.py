@@ -493,10 +493,31 @@ class ReportingAgent(BaseAgent):
         """HTML 템플릿 생성 — McKinsey-quality template"""
         template = McKinseyReportTemplate(report_data)
         shap_images = self._load_shap_images_base64()
+        feature_importance = self._load_feature_importance()
         return template.render(
             executive_summary=getattr(self, '_cached_executive_summary', ''),
             shap_images=shap_images,
+            feature_importance=feature_importance,
         )
+
+    def _load_feature_importance(self) -> List[Dict]:
+        """feature_importance.json 로드"""
+        # Primary: insights directory
+        fi_path = os.path.join(
+            settings.OUTPUTS_DIR, "insights", self.context.session_id,
+            "feature_importance.json"
+        )
+        if not os.path.exists(fi_path):
+            # Fallback: analysis directory
+            fi_path = os.path.join(
+                settings.OUTPUTS_DIR, "analysis", self.context.session_id,
+                "feature_importance.json"
+            )
+        try:
+            with open(fi_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
 
     def _package_artifacts(self, report_data: Dict[str, Any]) -> str:
         """

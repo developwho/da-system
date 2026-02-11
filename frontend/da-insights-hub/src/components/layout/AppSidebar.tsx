@@ -1,6 +1,7 @@
 import { MessageSquare, Database, Crown, FileText, HelpCircle, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { NavLink } from '@/components/NavLink';
+import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import {
   Sidebar,
@@ -70,9 +71,17 @@ export function AppSidebar() {
       className="border-r border-border bg-sidebar"
       collapsible="icon"
     >
-      <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
-          <img src="/icon.svg" alt="DA System" className="h-8 w-8 rounded-full" />
+      <SidebarHeader className={cn(
+        "border-b border-sidebar-border transition-all",
+        isCollapsed ? "p-2" : "p-4"
+      )}>
+        <div className={cn(
+          "flex items-center",
+          isCollapsed ? "justify-center" : "gap-3"
+        )}>
+          <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
+            <img src="/icon.svg" alt="DA System" className="h-5 w-5" />
+          </div>
           {!isCollapsed && (
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-sidebar-foreground">DA System</span>
@@ -82,7 +91,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="p-2">
+      <SidebarContent className={cn(!isCollapsed && "p-2")}>
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>

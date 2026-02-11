@@ -119,27 +119,33 @@ def normalize_research_results(data: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+_SERIALIZABLE_MODEL_KEYS = frozenset({
+    "model_path", "mlflow_run_id", "problem_type",
+    "metrics", "best_estimator", "best_model",
+    "feature_importance", "training_time", "feature_names",
+    "n_trials", "num_trials", "training_duration",
+})
+
+
 def normalize_modeling_result(data: Dict[str, Any]) -> Dict[str, Any]:
     if not data:
         return {}
 
-    model_data = {}
-    if isinstance(data.get("model_data"), dict):
-        model_data.update(data["model_data"])
+    model_data: Dict[str, Any] = {}
 
-    for key in [
-        "model_path",
-        "mlflow_run_id",
-        "problem_type",
-        "metrics",
-        "best_estimator",
-        "best_model",
-        "feature_importance",
-        "training_time",
-    ]:
+    # Whitelist: extract only serializable keys from model_data sub-dict
+    raw = data.get("model_data", {})
+    if isinstance(raw, dict):
+        for key in _SERIALIZABLE_MODEL_KEYS:
+            if key in raw:
+                model_data[key] = raw[key]
+
+    # Also extract from top-level data
+    for key in _SERIALIZABLE_MODEL_KEYS:
         if data.get(key) is not None:
-            model_data[key] = data.get(key)
+            model_data[key] = data[key]
 
+    # Sync best_estimator / best_model
     if "best_estimator" not in model_data and "best_model" in model_data:
         model_data["best_estimator"] = model_data.get("best_model")
     if "best_model" not in model_data and "best_estimator" in model_data:

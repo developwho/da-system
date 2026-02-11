@@ -230,5 +230,6 @@
   /* Stable scrollbar for substep logs */
   .substep-log-scroll {
     scrollbar-gutter: stable;
+    scroll-behavior: smooth;
   }
 }
