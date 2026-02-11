@@ -1,6 +1,6 @@
 # DA System - AI 데이터 분석 자동화 에이전트
 
-**Version:** 1.0.0-rc12 | **Updated:** 2026-02-08 | **Status:** 99% Production Ready
+**Version:** 1.0.0-rc14 | **Updated:** 2026-02-11 | **Status:** 99% Production Ready
 
 비전문가도 고품질 데이터 분석을 수행할 수 있도록 돕는 AI 에이전트 기반 자동화 시스템.
 데이터 업로드 → 문제 정의 → 선행연구 → 모델링 → 인사이트 → 리포트까지 15~30분 내 자동 완료.
@@ -210,6 +210,8 @@ D:\dasystem/
 | Modern AI UX (마크다운/타임스탬프/액션/세션히스토리/DnD/textarea) | 100% |
 | P5 캡처용 에너지 가격 Mock 시나리오 + 커스텀 아이콘 | 100% |
 | Mock 데모 시나리오 고급화 (Multi-turn 대화, 도메인 전문 응답) | 100% |
+| RC13 기능적 품질 대폭 개선 (DataIntelligence, 스마트 전처리, 적응형 Q&A, 리서치 연계) | 100% |
+| RC14 McKinsey-Quality HTML 리포트 템플릿 (Pretendard 타이포, KPI 카드, dotted 테이블, 인쇄용 CSS) | 100% |
 
 ### 미완료 / 다음 단계
 | 항목 | 우선순위 |
@@ -229,6 +231,8 @@ D:\dasystem/
 
 | 버전 | 날짜 | 요약 |
 |------|------|------|
+| 1.0.0-rc14 | 2026-02-11 | McKinsey-Quality HTML 리포트 템플릿: Pretendard 타이포그래피, KPI 카드 그리드, dotted-line 테이블, 섹션 번호, SHAP figure 프레임, 우선순위별 추천 카드, A4 인쇄용 CSS, HTML 보기 버튼 추가 |
+| 1.0.0-rc13 | 2026-02-10 | 기능적 품질 대폭 개선: DataIntelligence 레이어, 7단계 스마트 전처리, 적응형 Q&A/메트릭, LLM 리서치 쿼리, 리서치→모델링 연계, Cohen's d 에러 분석, SHAP HTML 임베드, 리포트 품질 강화 |
 | 1.0.0-rc12 | 2026-02-08 | Mock 데모 시나리오 고급화: Multi-turn 대화 상태 머신, 도메인 전문 응답, 리치 데이터 분석, 시스템 안내, 웰컴 카드 리뉴얼 |
 | 1.0.0-rc11 | 2026-02-08 | P5 캡처용 에너지 가격 Mock 시나리오 (더미 CSV, mock-data/websocket 전면 교체, 커스텀 Brain 아이콘, CAPTURE_MODE, Mock 세션 버그 수정) |
 | 1.0.0-rc10 | 2026-02-06 | Modern AI UX: Rich Markdown, 메시지 액션/타임스탬프, 세션 히스토리, DnD, auto-resize textarea, 404 한글화, 비기능 버튼 정리 |

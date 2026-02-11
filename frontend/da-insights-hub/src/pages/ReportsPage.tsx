@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react';
 import {
   FileText,
   Download,
+  ExternalLink,
   Zap,
   CheckCircle,
   Loader2,
@@ -21,6 +22,7 @@ import {
 } from '@/components/ui/table';
 import { useReports, useReportContent } from '@/hooks/use-reports';
 import { reportsApi } from '@/services/reports-api';
+import { config } from '@/lib/config';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -136,6 +138,19 @@ export default function ReportsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              title="HTML 리포트 보기"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`${config.apiBaseUrl}/reports/${report.sessionId}/html`, '_blank');
+                              }}
+                            >
+                              <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="아티팩트 다운로드"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDownload(report.sessionId);

@@ -3,10 +3,12 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import os
 import shutil
+import base64
 from pathlib import Path
 import json
 
 from app.agents.base import BaseAgent, AgentContext, AgentResult, AgentState
+from app.agents.report_template import McKinseyReportTemplate
 from app.config import settings
 
 
@@ -90,6 +92,9 @@ class ReportingAgent(BaseAgent):
             "research_results": self.context.data.get("research_results", {}),
             "model_data": self.context.data.get("model_data", {}),
             "insights": self.context.data.get("insights", {}),
+            "data_intelligence": self.context.data.get("data_intelligence", {}),
+            "preprocessing_log": self.context.data.get("preprocessing_log", []),
+            "data_profile": self.context.data.get("data_profile", {}),
         }
 
         return report_data
@@ -126,6 +131,7 @@ class ReportingAgent(BaseAgent):
                 # 1. Executive Summary
                 f.write("## 1. Executive Summary\n\n")
                 summary = await self._generate_executive_summary(report_data)
+                self._cached_executive_summary = summary
                 f.write(summary)
                 f.write("\n\n")
 
@@ -137,24 +143,32 @@ class ReportingAgent(BaseAgent):
                 f.write("## 3. Prior Research\n\n")
                 self._write_research_findings(f, report_data.get("research_results", {}))
 
-                # 4. Data Analysis
-                f.write("## 4. Data Analysis\n\n")
+                # 4. Data Quality
+                f.write("## 4. Data Quality & Preprocessing\n\n")
+                self._write_data_quality_section(f, report_data)
+
+                # 5. Data Analysis
+                f.write("## 5. Data Analysis\n\n")
                 self._write_data_analysis(f, report_data)
 
-                # 5. Modeling
-                f.write("## 5. Modeling\n\n")
+                # 6. Modeling
+                f.write("## 6. Modeling\n\n")
                 self._write_modeling_section(f, report_data.get("model_data", {}))
 
-                # 6. Model Insights
-                f.write("## 6. Model Insights\n\n")
+                # 7. Model Insights
+                f.write("## 7. Model Insights\n\n")
                 self._write_insights_section(f, report_data.get("insights", {}))
 
-                # 7. Recommendations
-                f.write("## 7. Recommendations\n\n")
+                # 8. Research Comparison
+                f.write("## 8. Research Comparison\n\n")
+                self._write_research_comparison(f, report_data)
+
+                # 9. Recommendations
+                f.write("## 9. Recommendations\n\n")
                 self._write_recommendations(f, report_data)
 
-                # 8. Appendix
-                f.write("## 8. Appendix\n\n")
+                # 10. Appendix
+                f.write("## 10. Appendix\n\n")
                 self._write_appendix(f, report_data)
 
             self.logger.info(f"Markdown report saved to {output_file}")
@@ -165,23 +179,36 @@ class ReportingAgent(BaseAgent):
             raise
 
     async def _generate_executive_summary(self, report_data: Dict[str, Any]) -> str:
-        """Executive Summary 생성 (LLM 사용)"""
+        """Executive Summary 생성 (LLM 사용) — 도메인 맞춤"""
 
         try:
-            # 주요 정보 추출
             problem_def = report_data.get("problem_definition", {})
             model_data = report_data.get("model_data", {})
             insights = report_data.get("insights", {})
+            data_intel = report_data.get("data_intelligence", {})
 
             problem_type = problem_def.get("problem_type", "N/A")
             goal = problem_def.get("analysis_goal") or problem_def.get("goal", "N/A")
             metrics = model_data.get("metrics", {})
             key_findings = insights.get("key_findings", [])
 
+            # 도메인 컨텍스트
+            domain_ctx = ""
+            domain_info = data_intel.get("domain", {})
+            if domain_info and domain_info.get("domain", "general") != "general":
+                domain_ctx = f"\n**Domain:** {domain_info['domain']} (confidence: {domain_info.get('confidence', 'N/A')})"
+
+            # 리서치 벤치마크
+            research = report_data.get("research_results", {})
+            research_ctx = ""
+            research_summary = research.get("summary", "")
+            if research_summary and len(research_summary) > 20:
+                research_ctx = f"\n**Research Benchmark:** {research_summary[:300]}"
+
             prompt = f"""다음 데이터 분석 프로젝트의 Executive Summary를 작성하세요.
 
 **Problem Type:** {problem_type}
-**Goal:** {goal}
+**Goal:** {goal}{domain_ctx}{research_ctx}
 
 **Model Performance:**
 {json.dumps(metrics, indent=2)}
@@ -189,15 +216,15 @@ class ReportingAgent(BaseAgent):
 **Key Findings:**
 {chr(10).join([f"- {f}" for f in key_findings[:5]])}
 
-2-3 문단으로 다음을 포함하여 작성하세요:
+2-3 문단으로 비기술적 경영진을 위한 수준으로 작성하세요:
 1. 프로젝트 목표 및 접근 방법
-2. 주요 결과 및 성능
-3. 핵심 인사이트
+2. 주요 결과 및 성능 (선행연구 대비 비교 가능 시 포함)
+3. 핵심 인사이트 및 비즈니스 가치
 
 간결하고 임원에게 보고하는 형식으로 작성하세요.
 """
 
-            response = await self.generate(prompt, max_tokens=500)
+            response = await self.generate(prompt, max_tokens=600, temperature=0.5)
             return response.content
 
         except Exception as e:
@@ -300,6 +327,121 @@ class ReportingAgent(BaseAgent):
         else:
             f.write("No specific recommendations at this time.\n\n")
 
+    def _write_data_quality_section(self, f, report_data: Dict[str, Any]):
+        """Data Quality & Preprocessing 섹션 작성"""
+        data_intel = report_data.get("data_intelligence", {})
+        preprocessing_log = report_data.get("preprocessing_log", [])
+
+        # 도메인 감지
+        domain = data_intel.get("domain", {})
+        if domain and domain.get("domain", "general") != "general":
+            f.write(f"**Detected Domain:** {domain['domain']} (confidence: {domain.get('confidence', 'N/A')})\n\n")
+
+        # 불균형 분석
+        imbalance = data_intel.get("class_imbalance", {})
+        if imbalance and imbalance.get("severity"):
+            f.write(f"**Class Imbalance:** {imbalance['severity']} (ratio {imbalance.get('ratio', 'N/A')}:1, minority {imbalance.get('minority_pct', 'N/A')}%)\n\n")
+
+        # 이상치 요약
+        outliers = data_intel.get("outlier_report", {})
+        if outliers:
+            flagged = [col for col, info in outliers.items()
+                       if isinstance(info, dict) and info.get("outlier_pct", 0) > 5]
+            if flagged:
+                f.write(f"**Outlier Columns ({len(flagged)}):** {', '.join(flagged[:10])}\n\n")
+
+        # 전처리 로그
+        if preprocessing_log:
+            f.write("### Applied Preprocessing Steps\n\n")
+            for step in preprocessing_log:
+                f.write(f"- {step}\n")
+            f.write("\n")
+
+        # 데이터 경고
+        warnings = data_intel.get("data_warnings", [])
+        if warnings:
+            f.write("### Data Warnings\n\n")
+            for w in warnings:
+                f.write(f"- {w}\n")
+            f.write("\n")
+
+        if not data_intel and not preprocessing_log:
+            f.write("No data quality analysis available.\n\n")
+
+    def _write_research_comparison(self, f, report_data: Dict[str, Any]):
+        """Research Comparison 섹션 — 테이블 형태"""
+        research = report_data.get("research_results", {})
+        model_data = report_data.get("model_data", {})
+        metrics = model_data.get("metrics", {})
+
+        # 추천 모델과 기법
+        recommended = research.get("recommended_models", [])
+        techniques = research.get("techniques", [])
+
+        if not research or (not recommended and not techniques):
+            f.write("No prior research data available for comparison.\n\n")
+            return
+
+        # 기법 테이블
+        if techniques:
+            f.write("### Identified Techniques from Research\n\n")
+            f.write("| Source | Techniques |\n")
+            f.write("|--------|------------|\n")
+
+            papers = research.get("papers", [])
+            kaggle = research.get("kaggle_solutions") or research.get("kaggle", {})
+            deep = research.get("deep_research", {})
+
+            if papers:
+                f.write(f"| HuggingFace Papers | {len(papers)} papers reviewed |\n")
+            if kaggle and kaggle.get("techniques"):
+                f.write(f"| Kaggle Solutions | {', '.join(kaggle['techniques'][:5])} |\n")
+            if deep and deep.get("key_findings"):
+                f.write(f"| DeepResearch | {len(deep['key_findings'])} key findings |\n")
+            f.write("\n")
+
+        # 성능 비교 (가능한 경우)
+        best_model = model_data.get("best_estimator") or model_data.get("best_model", "N/A")
+        if metrics:
+            f.write("### Our Model Performance\n\n")
+            f.write(f"**Best Model:** {best_model}\n\n")
+            f.write("| Metric | Score |\n")
+            f.write("|--------|-------|\n")
+            for k, v in metrics.items():
+                if isinstance(v, float):
+                    f.write(f"| {k} | {v:.4f} |\n")
+                else:
+                    f.write(f"| {k} | {v} |\n")
+            f.write("\n")
+
+        if recommended:
+            f.write(f"**Research-recommended models:** {', '.join(recommended[:5])}\n\n")
+
+    def _load_shap_images_base64(self) -> List[Dict[str, str]]:
+        """SHAP 이미지 파일을 base64로 로드"""
+        images = []
+        shap_dir = os.path.join(
+            settings.OUTPUTS_DIR, "shap", self.context.session_id
+        )
+        if not os.path.exists(shap_dir):
+            return images
+
+        for filename in sorted(os.listdir(shap_dir)):
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                filepath = os.path.join(shap_dir, filename)
+                try:
+                    with open(filepath, "rb") as img_f:
+                        encoded = base64.b64encode(img_f.read()).decode("utf-8")
+                    ext = filename.rsplit('.', 1)[-1].lower()
+                    mime = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else 'png'}"
+                    images.append({
+                        "filename": filename,
+                        "data_uri": f"data:{mime};base64,{encoded}",
+                    })
+                except Exception:
+                    pass
+        return images
+
     def _write_appendix(self, f, report_data: Dict[str, Any]):
         """Appendix 섹션 작성"""
 
@@ -348,140 +490,13 @@ class ReportingAgent(BaseAgent):
             raise
 
     def _create_html_template(self, report_data: Dict[str, Any]) -> str:
-        """HTML 템플릿 생성"""
-
-        problem_def = report_data.get("problem_definition", {})
-        model_data = report_data.get("model_data", {})
-        insights = report_data.get("insights", {})
-
-        html = f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Analysis Report - {report_data['session_id']}</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }}
-        .container {{
-            background-color: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        h1 {{
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }}
-        h2 {{
-            color: #34495e;
-            margin-top: 30px;
-        }}
-        .metric {{
-            display: inline-block;
-            margin: 10px 20px 10px 0;
-            padding: 15px;
-            background-color: #ecf0f1;
-            border-radius: 5px;
-        }}
-        .metric-label {{
-            font-size: 12px;
-            color: #7f8c8d;
-            text-transform: uppercase;
-        }}
-        .metric-value {{
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c3e50;
-        }}
-        .insight {{
-            background-color: #e8f5e9;
-            border-left: 4px solid #4caf50;
-            padding: 15px;
-            margin: 10px 0;
-        }}
-        .warning {{
-            background-color: #fff3e0;
-            border-left: 4px solid #ff9800;
-            padding: 15px;
-            margin: 10px 0;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }}
-        th, td {{
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }}
-        th {{
-            background-color: #3498db;
-            color: white;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📊 Data Analysis Report</h1>
-        <p><strong>Session ID:</strong> {report_data['session_id']}</p>
-        <p><strong>Generated:</strong> {report_data['timestamp']}</p>
-
-        <h2>Problem Definition</h2>
-        <p><strong>Type:</strong> {problem_def.get('problem_type', 'N/A')}</p>
-        <p><strong>Goal:</strong> {problem_def.get('analysis_goal') or problem_def.get('goal', 'N/A')}</p>
-
-        <h2>Model Performance</h2>
-        <div class="metrics">
-"""
-
-        # Metrics
-        metrics = model_data.get("metrics", {})
-        for key, value in metrics.items():
-            if isinstance(value, float):
-                html += f"""
-            <div class="metric">
-                <div class="metric-label">{key}</div>
-                <div class="metric-value">{value:.4f}</div>
-            </div>
-"""
-
-        html += """
-        </div>
-
-        <h2>Key Insights</h2>
-"""
-
-        # Insights
-        key_findings = insights.get("key_findings", [])
-        for finding in key_findings:
-            html += f'        <div class="insight">✓ {finding}</div>\n'
-
-        html += """
-        <h2>Recommendations</h2>
-"""
-
-        # Recommendations
-        recommendations = insights.get("recommendations", [])
-        for rec in recommendations:
-            html += f'        <div class="warning">⚠ {rec}</div>\n'
-
-        html += """
-    </div>
-</body>
-</html>
-"""
-
-        return html
+        """HTML 템플릿 생성 — McKinsey-quality template"""
+        template = McKinseyReportTemplate(report_data)
+        shap_images = self._load_shap_images_base64()
+        return template.render(
+            executive_summary=getattr(self, '_cached_executive_summary', ''),
+            shap_images=shap_images,
+        )
 
     def _package_artifacts(self, report_data: Dict[str, Any]) -> str:
         """
