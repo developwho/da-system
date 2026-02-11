@@ -20,6 +20,20 @@ import { formatDuration } from '@/lib/mock-data';
 import { config } from '@/lib/config';
 import type { ModelStatus, Model } from '@/types';
 
+// Ratio metrics: value is 0-1, display as percentage
+const RATIO_METRICS = new Set([
+  'rocAuc', 'roc_auc', 'accuracy', 'f1Score', 'f1', 'f1_weighted', 'f1_macro',
+  'precision', 'precision_weighted', 'recall', 'recall_weighted', 'r2',
+]);
+
+function formatMetric(key: string, value: unknown): string | null {
+  if (value == null || typeof value !== 'number') return null;
+  if (RATIO_METRICS.has(key)) {
+    return (value * 100).toFixed(2) + '%';
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 export default function ModelsPage() {
   const navigate = useNavigate();
   const { activeSessionId } = useApp();
@@ -308,13 +322,15 @@ function ModelCard({ model }: { model: Model }) {
                 <div>
                   <h3 className="text-sm font-semibold mb-3">성능 지표</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    {Object.entries(modelDetail.metrics).map(([key, value]) => (
+                    {Object.entries(modelDetail.metrics)
+                      .filter(([key, value]) => formatMetric(key, value) !== null)
+                      .map(([key, value]) => (
                       <div key={key} className="rounded-lg border p-3">
                         <p className="text-xs text-muted-foreground capitalize">
                           {key.replace(/([A-Z])/g, ' $1').trim()}
                         </p>
                         <p className="text-lg font-semibold">
-                          {typeof value === 'number' ? (value * 100).toFixed(2) + '%' : value}
+                          {formatMetric(key, value)}
                         </p>
                       </div>
                     ))}

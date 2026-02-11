@@ -36,13 +36,26 @@ class PapersAgent(BaseAgent):
             self.start_time = datetime.now()
             self.logger.info("Starting papers research")
 
-            # 1. 문제 정의에서 검색 쿼리 추출
+            # 1. 문제 정의에서 검색 쿼리 추출 (LLM 우선, 폴백 키워드)
             problem_definition = self.context.data.get("problem_definition", {})
             if not problem_definition:
                 raise ValueError("Problem definition not found in context")
 
-            query = self.hf_client.extract_keywords(problem_definition)
-            await self.emit_event("query_extracted", {"query": query})
+            # DataIntelligence 결과를 problem_definition에 병합
+            data_intel = self.context.data.get("data_intelligence", {})
+            if data_intel:
+                problem_definition = dict(problem_definition)
+                problem_definition["data_intelligence"] = data_intel
+
+            try:
+                query = await self.hf_client.generate_search_query(
+                    problem_definition,
+                    llm_generate_fn=self.generate
+                )
+                await self.emit_event("query_generated", {"query": query})
+            except Exception:
+                query = self.hf_client.extract_keywords(problem_definition)
+                await self.emit_event("query_extracted", {"query": query})
 
             # 2. 논문 검색
             papers = await self.hf_client.search_papers(
@@ -117,7 +130,18 @@ class PapersAgent(BaseAgent):
                 for p in papers[:5]  # 상위 5개만
             ])
 
+            # 도메인 컨텍스트 추가
+            problem_def = self.context.data.get("problem_definition", {})
+            domain_info = self.context.data.get("data_intelligence", {}).get("domain", {})
+            domain_ctx = ""
+            if domain_info and domain_info.get("domain", "general") != "general":
+                domain_ctx = f"\n분석 도메인: {domain_info['domain']}"
+            goal = problem_def.get("analysis_goal") or problem_def.get("goal", "")
+            if goal:
+                domain_ctx += f"\n분석 목표: {goal}"
+
             prompt = f"""다음은 데이터 분석 문제와 관련된 논문 목록입니다.
+{domain_ctx}
 
 {papers_text}
 

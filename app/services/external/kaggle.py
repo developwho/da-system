@@ -281,7 +281,7 @@ class KaggleClient:
 
     def _extract_techniques(self, kernels: List[KernelInfo]) -> List[str]:
         """
-        Kernel 목록에서 기법 추출
+        Kernel 목록에서 기법 추출 — 40+ 현대 ML 기법
 
         Args:
             kernels: Kernel 정보 리스트
@@ -291,13 +291,29 @@ class KaggleClient:
         """
         techniques = []
 
-        # Kernel 제목에서 키워드 추출
         keywords = [
-            "XGBoost", "LightGBM", "CatBoost", "Random Forest",
-            "Neural Network", "Deep Learning", "Ensemble",
-            "Feature Engineering", "Stacking", "Blending",
-            "Cross Validation", "Hyperparameter Tuning",
-            "Data Augmentation", "Transfer Learning"
+            # Tree-based
+            "XGBoost", "LightGBM", "CatBoost", "Random Forest", "Gradient Boosting",
+            "Extra Trees", "Decision Tree", "AdaBoost",
+            # Deep Learning
+            "Neural Network", "Deep Learning", "TabNet", "Transformer",
+            "LSTM", "GRU", "CNN", "MLP", "Autoencoder",
+            # Ensemble
+            "Ensemble", "Stacking", "Blending", "Voting", "Bagging",
+            # Feature Engineering
+            "Feature Engineering", "Feature Selection", "Target Encoding",
+            "Frequency Encoding", "Embedding", "PCA", "Dimensionality Reduction",
+            # Imbalance
+            "SMOTE", "Oversampling", "Undersampling", "Class Weight",
+            # Validation
+            "Cross Validation", "K-Fold", "Stratified", "Adversarial Validation",
+            # Optimization
+            "Hyperparameter Tuning", "Optuna", "Bayesian Optimization",
+            "Grid Search", "Random Search",
+            # Other
+            "Data Augmentation", "Transfer Learning", "Pseudo Labeling",
+            "AutoML", "Regularization", "Early Stopping",
+            "Normalization", "Standardization",
         ]
 
         for kernel in kernels:
@@ -306,7 +322,7 @@ class KaggleClient:
                 if keyword.lower() in title_lower and keyword not in techniques:
                     techniques.append(keyword)
 
-        return techniques[:10]  # 상위 10개
+        return techniques[:15]
 
     def _generate_recommendations(
         self,
@@ -356,7 +372,7 @@ class KaggleClient:
 
     def extract_query_from_problem(self, problem_definition: Dict[str, Any]) -> str:
         """
-        문제 정의에서 Kaggle 검색 쿼리 추출
+        문제 정의에서 Kaggle 검색 쿼리 추출 — 도메인 맞춤
 
         Args:
             problem_definition: 문제 정의 딕셔너리
@@ -366,21 +382,32 @@ class KaggleClient:
         """
         keywords = []
 
+        # 도메인 정보 우선
+        data_intel = problem_definition.get("data_intelligence", {})
+        domain_info = data_intel.get("domain", {}) if isinstance(data_intel, dict) else {}
+        domain = domain_info.get("domain", "") if isinstance(domain_info, dict) else ""
+        if domain and domain != "general":
+            keywords.append(domain)
+
+        # 분석 목표 (더 많은 단어)
+        goal = problem_definition.get("goal") or problem_definition.get("analysis_goal", "")
+        if goal:
+            goal_words = goal.split()[:4]
+            keywords.extend(goal_words)
+
+        # 타겟 변수
+        target = problem_definition.get("target_column") or problem_definition.get("target_variable", "")
+        if target:
+            keywords.append(target)
+
         # 문제 유형
         problem_type = problem_definition.get("problem_type", "")
         if "classification" in problem_type.lower():
             keywords.append("classification")
         elif "regression" in problem_type.lower():
-            keywords.append("regression")
-        elif "time series" in problem_type.lower():
-            keywords.append("time series")
-
-        # 목표
-        goal = problem_definition.get("goal") or problem_definition.get("analysis_goal", "")
-        if goal:
-            # 간단한 키워드 추출
-            goal_words = goal.split()[:2]
-            keywords.extend(goal_words)
+            keywords.append("prediction")
+        elif "time" in problem_type.lower():
+            keywords.append("forecasting")
 
         query = " ".join(keywords) if keywords else "machine learning"
         logger.info(f"Extracted Kaggle query: {query}")

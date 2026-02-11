@@ -31,7 +31,10 @@ class TypeDetector:
                 "confidence": float,
                 "reasoning": str,
                 "details": dict,
-                "recommended_target": str
+                "recommended_target": str,
+                "is_balanced": bool,
+                "imbalance_ratio": float,
+                "class_distribution": dict
             }
         """
         target_column = TypeDetector._infer_target_column(df)
@@ -39,13 +42,37 @@ class TypeDetector:
         task_type = detection.get("task_type")
         problem_type = "time_series" if task_type == "timeseries" else task_type
 
-        return {
+        details = detection.get("details", {})
+
+        result = {
             "problem_type": problem_type,
             "confidence": detection.get("confidence", 0.0),
             "reasoning": detection.get("reasoning", ""),
-            "details": detection.get("details", {}),
-            "recommended_target": target_column
+            "details": details,
+            "recommended_target": target_column,
         }
+
+        # 분류 문제의 경우 불균형 정보 추가
+        if target_column and target_column in df.columns:
+            target = df[target_column]
+            is_balanced = details.get("is_balanced", True)
+            result["is_balanced"] = is_balanced
+
+            class_dist = details.get("class_distribution", {})
+            result["class_distribution"] = class_dist
+
+            if class_dist:
+                max_count = max(class_dist.values())
+                min_count = min(class_dist.values()) if class_dist else 1
+                result["imbalance_ratio"] = round(max_count / min_count, 2) if min_count > 0 else float("inf")
+            else:
+                result["imbalance_ratio"] = 1.0
+        else:
+            result["is_balanced"] = True
+            result["imbalance_ratio"] = 1.0
+            result["class_distribution"] = {}
+
+        return result
 
     @staticmethod
     def detect_task_type(
@@ -192,13 +219,20 @@ class TypeDetector:
 
     @staticmethod
     def _is_continuous_integers(target: pd.Series) -> bool:
-        """정수가 연속적인지 확인"""
+        """정수가 연속적인지 확인 (집값, 급여 등 넓은 범위의 수치도 연속형으로 판정)"""
         unique_vals = sorted(target.dropna().unique())
-        if len(unique_vals) < 2:
+        n_unique = len(unique_vals)
+        if n_unique < 2:
             return True
 
-        # 값 간 차이가 대부분 1이면 연속적
-        diffs = [unique_vals[i+1] - unique_vals[i] for i in range(len(unique_vals)-1)]
+        value_range = unique_vals[-1] - unique_vals[0]
+
+        # 고유값 20+개 AND 범위 100+ → 연속형 (집값, 급여 등)
+        if n_unique > 20 and value_range > 100:
+            return True
+
+        # 기존: 값 간 차이가 대부분 1이면 연속적 (인코딩 라벨 감지용)
+        diffs = [unique_vals[i+1] - unique_vals[i] for i in range(n_unique - 1)]
         avg_diff = sum(diffs) / len(diffs)
         return avg_diff <= 2
 

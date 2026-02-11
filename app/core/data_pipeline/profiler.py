@@ -73,14 +73,17 @@ class DataProfiler:
             # 수치형 변수 통계
             if pd.api.types.is_numeric_dtype(col_data):
                 var_profile["variable_type"] = "numeric"
+                is_all_null = col_data.isnull().all()
                 var_profile["statistics"] = {
-                    "mean": float(col_data.mean()) if not col_data.isnull().all() else None,
-                    "std": float(col_data.std()) if not col_data.isnull().all() else None,
-                    "min": float(col_data.min()) if not col_data.isnull().all() else None,
-                    "25%": float(col_data.quantile(0.25)) if not col_data.isnull().all() else None,
-                    "50%": float(col_data.median()) if not col_data.isnull().all() else None,
-                    "75%": float(col_data.quantile(0.75)) if not col_data.isnull().all() else None,
-                    "max": float(col_data.max()) if not col_data.isnull().all() else None,
+                    "mean": float(col_data.mean()) if not is_all_null else None,
+                    "std": float(col_data.std()) if not is_all_null else None,
+                    "min": float(col_data.min()) if not is_all_null else None,
+                    "25%": float(col_data.quantile(0.25)) if not is_all_null else None,
+                    "50%": float(col_data.median()) if not is_all_null else None,
+                    "75%": float(col_data.quantile(0.75)) if not is_all_null else None,
+                    "max": float(col_data.max()) if not is_all_null else None,
+                    "skewness": float(col_data.skew()) if not is_all_null else None,
+                    "kurtosis": float(col_data.kurt()) if not is_all_null else None,
                     "zeros_count": int((col_data == 0).sum()),
                     "zeros_pct": float(((col_data == 0).sum() / len(col_data)) * 100)
                 }

@@ -191,7 +191,7 @@ class ResearchCoordinator(BaseAgent):
 
     async def _generate_integrated_summary(self, integrated_data: Dict[str, Any]) -> str:
         """
-        통합 요약 생성 (LLM 사용)
+        통합 요약 생성 (LLM 사용) — 도메인 컨텍스트 + 합의 기법 추출
 
         Args:
             integrated_data: 통합 데이터
@@ -200,12 +200,23 @@ class ResearchCoordinator(BaseAgent):
             요약 텍스트
         """
         try:
+            # 도메인 컨텍스트
+            problem_def = self.context.data.get("problem_definition", {})
+            domain_info = self.context.data.get("data_intelligence", {}).get("domain", {})
+            domain_ctx = ""
+            if domain_info and domain_info.get("domain", "general") != "general":
+                domain_ctx = f"\n**분석 도메인:** {domain_info['domain']}"
+            goal = problem_def.get("analysis_goal") or problem_def.get("goal", "")
+            if goal:
+                domain_ctx += f"\n**분석 목표:** {goal}"
+
             # 각 소스의 정보 추출
-            papers_count = len(integrated_data.get("papers", []))
+            papers_count = len(integrated_data.get("papers", []) or [])
             kaggle_data = integrated_data.get("kaggle_solutions") or integrated_data.get("kaggle")
             deep_research_data = integrated_data.get("deep_research")
 
             prompt = f"""다음은 3개의 선행 연구 소스에서 수집한 정보입니다.
+{domain_ctx}
 
 **HuggingFace Papers:**
 - {papers_count}개의 관련 논문 발견
@@ -218,19 +229,47 @@ class ResearchCoordinator(BaseAgent):
 
 **추출된 기법:** {', '.join(integrated_data.get('techniques', [])[:10])}
 
-이 정보들을 종합하여 다음을 제공하세요:
+이 정보들을 종합하여 다음을 JSON 형식으로 제공하세요:
 
-1. **Executive Summary** (3-4 문장)
-2. **Top 5 추천 기법**
-3. **Top 3 추천 모델**
-4. **핵심 성공 요인** (3개)
-5. **주의사항** (2-3개)
+{{
+  "executive_summary": "3-4문장 요약",
+  "top_techniques": ["기법1", "기법2", ...],
+  "recommended_models": ["모델1", "모델2", "모델3"],
+  "success_factors": ["요인1", "요인2", "요인3"],
+  "warnings": ["주의1", "주의2"],
+  "source_relevance": {{
+    "papers": 0-10 점수,
+    "kaggle": 0-10 점수,
+    "deep_research": 0-10 점수
+  }}
+}}
 
-간결하고 실행 가능한 형태로 작성하세요.
+참고:
+- 여러 소스에서 공통으로 언급된 기법에 높은 우선순위 부여
+- recommended_models는 FLAML에서 사용 가능한 모델명 (xgboost, lightgbm, catboost, random forest 등)으로 반환
+- 각 소스의 관련성 점수(0-10)도 포함
 """
 
-            response = await self.generate(prompt, max_tokens=1500)
-            return response.content
+            response = await self.generate(prompt, max_tokens=1500, temperature=0.4)
+            content = response.content
+
+            # JSON 파싱 시도 → recommended_models 추출
+            import re
+            try:
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    import json
+                    parsed = json.loads(json_match.group())
+                    # recommended_models를 integrated_data에 반영
+                    if parsed.get("recommended_models"):
+                        integrated_data["recommended_models"] = list(set(
+                            integrated_data.get("recommended_models", []) +
+                            parsed["recommended_models"]
+                        ))
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+            return content
 
         except Exception as e:
             self.logger.error(f"Failed to generate integrated summary: {e}")

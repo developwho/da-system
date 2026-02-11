@@ -247,9 +247,55 @@ class HuggingFaceClient:
             logger.error(f"Error getting paper details: {e}")
             return None
 
+    async def generate_search_query(
+        self,
+        problem_definition: Dict[str, Any],
+        llm_generate_fn=None
+    ) -> str:
+        """
+        LLM 기반 학술적 검색 쿼리 생성.
+
+        Args:
+            problem_definition: 문제 정의 딕셔너리
+            llm_generate_fn: LLM 호출 함수 (async, prompt -> response)
+
+        Returns:
+            학술적 검색 쿼리 문자열
+        """
+        if llm_generate_fn is None:
+            return self.extract_keywords(problem_definition)
+
+        try:
+            problem_type = problem_definition.get("problem_type", "classification")
+            target = problem_definition.get("target_column") or problem_definition.get("target_variable", "")
+            goal = problem_definition.get("analysis_goal") or problem_definition.get("goal", "")
+            domain_info = problem_definition.get("domain") or problem_definition.get("data_intelligence", {}).get("domain", {})
+            domain = domain_info.get("domain", "general") if isinstance(domain_info, dict) else str(domain_info)
+
+            prompt = f"""Generate a concise academic search query (10-15 words, English) for finding relevant machine learning papers.
+
+Context:
+- Problem type: {problem_type}
+- Target variable: {target}
+- Analysis goal: {goal}
+- Domain: {domain}
+
+Return ONLY the search query, nothing else. Make it specific and academic.
+Example: "customer churn prediction machine learning behavioral features telecom"
+"""
+            response = await llm_generate_fn(prompt, max_tokens=100, temperature=0.4)
+            query = response.content.strip().strip('"').strip("'")
+            if len(query) > 10:
+                logger.info(f"LLM generated search query: {query}")
+                return query
+        except Exception as e:
+            logger.warning(f"LLM query generation failed, falling back: {e}")
+
+        return self.extract_keywords(problem_definition)
+
     def extract_keywords(self, problem_definition: Dict[str, Any]) -> str:
         """
-        문제 정의에서 검색 키워드 추출
+        문제 정의에서 검색 키워드 추출 (동기 폴백)
 
         Args:
             problem_definition: 문제 정의 딕셔너리
@@ -259,28 +305,37 @@ class HuggingFaceClient:
         """
         keywords = []
 
+        # 도메인 정보 우선
+        data_intel = problem_definition.get("data_intelligence", {})
+        domain_info = data_intel.get("domain", {}) if isinstance(data_intel, dict) else {}
+        domain = domain_info.get("domain", "") if isinstance(domain_info, dict) else ""
+        if domain and domain != "general":
+            keywords.append(domain)
+
         # 문제 유형
         problem_type = problem_definition.get("problem_type", "")
         if problem_type:
-            keywords.append(problem_type)
+            # 더 자연스러운 형태로
+            type_map = {
+                "binary_classification": "binary classification",
+                "multiclass_classification": "multiclass classification",
+                "regression": "regression prediction",
+                "time_series": "time series forecasting",
+            }
+            keywords.append(type_map.get(problem_type, problem_type))
+
+        # 분석 목표 (핵심 단어만)
+        goal = problem_definition.get("goal") or problem_definition.get("analysis_goal", "")
+        if goal:
+            goal_words = goal.split()[:5]
+            keywords.extend(goal_words)
 
         # 타겟 변수
         target = problem_definition.get("target_variable") or problem_definition.get("target_column", "")
-        if target:
+        if target and target not in keywords:
             keywords.append(target)
 
-        # 도메인/목표
-        goal = problem_definition.get("goal") or problem_definition.get("analysis_goal", "")
-        if goal:
-            # 간단한 키워드 추출 (첫 3단어)
-            goal_words = goal.split()[:3]
-            keywords.extend(goal_words)
-
-        # 데이터셋 특성
-        if "data_characteristics" in problem_definition:
-            chars = problem_definition["data_characteristics"]
-            if "domain" in chars:
-                keywords.append(chars["domain"])
+        keywords.append("machine learning")
 
         query = " ".join(keywords)
         logger.info(f"Extracted keywords: {query}")

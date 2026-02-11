@@ -553,13 +553,35 @@ def _to_native_types(obj):
 
 
 def _get_metric_options(problem_type: str) -> list:
-    """문제 유형별 평가 지표 옵션 반환"""
+    """문제 유형별 평가 지표 옵션 반환 (레거시 — 비적응형)"""
+    return _get_metric_options_adaptive(problem_type, {})
+
+
+def _get_metric_options_adaptive(problem_type: str, imbalance: dict) -> list:
+    """문제 유형별 평가 지표 옵션 반환 — 데이터 불균형 반영"""
+    ratio = imbalance.get("ratio", 1)
+    minority_pct = imbalance.get("minority_pct", 50)
+    is_imbalanced = imbalance.get("detected", False)
+
     if problem_type in ("binary_classification",):
-        return [
-            {"value": "roc_auc", "label": "ROC-AUC", "recommended": True, "reason": "불균형 이진 분류에 최적"},
-            {"value": "f1", "label": "F1 Score", "reason": "정밀도/재현율 조화 평균"},
-            {"value": "accuracy", "label": "Accuracy", "reason": "단순 정확도"},
-        ]
+        if is_imbalanced and ratio > 5:
+            return [
+                {"value": "f1", "label": "F1 Score", "recommended": True,
+                 "reason": f"권장 - 양성 클래스가 {minority_pct}%로 불균형"},
+                {"value": "roc_auc", "label": "ROC-AUC",
+                 "reason": "확률 기반 순위 평가"},
+                {"value": "accuracy", "label": "Accuracy",
+                 "reason": "불균형 데이터에서는 부적합할 수 있음"},
+            ]
+        else:
+            return [
+                {"value": "roc_auc", "label": "ROC-AUC", "recommended": True,
+                 "reason": "권장 - 균형 데이터" if not is_imbalanced else "확률 기반 순위 평가"},
+                {"value": "f1", "label": "F1 Score",
+                 "reason": "정밀도/재현율 조화 평균"},
+                {"value": "accuracy", "label": "Accuracy",
+                 "reason": "단순 정확도"},
+            ]
     elif problem_type in ("multiclass_classification",):
         return [
             {"value": "f1_macro", "label": "F1 Macro", "recommended": True, "reason": "클래스별 균형 평가"},
@@ -579,7 +601,7 @@ def _get_metric_options(problem_type: str) -> list:
 
 
 async def _build_analysis_questions(session_context: dict) -> dict:
-    """DataProfiler + TypeDetector 실행 → 프로필 요약 + 질문 구성"""
+    """DataProfiler + TypeDetector + DataIntelligence 실행 → 프로필 요약 + 적응형 질문 구성"""
     file_path = session_context.get("file_path")
     if not file_path:
         raise ValueError("No file_path in session context")
@@ -587,6 +609,7 @@ async def _build_analysis_questions(session_context: dict) -> dict:
     from app.core.data_pipeline.loader import DataLoader
     from app.core.data_pipeline.profiler import DataProfiler
     from app.core.data_pipeline.type_detector import TypeDetector
+    from app.core.data_pipeline.data_intelligence import DataIntelligence
 
     df, _ = await run_in_threadpool(DataLoader.load_file, file_path)
 
@@ -595,6 +618,13 @@ async def _build_analysis_questions(session_context: dict) -> dict:
 
     detector = TypeDetector()
     detection = await run_in_threadpool(detector.detect, df)
+
+    # DataIntelligence 실행
+    di = DataIntelligence()
+    data_intel = await run_in_threadpool(di.analyze, df, profile)
+
+    # 세션 컨텍스트에 DataIntelligence 결과 저장
+    session_context["data_intelligence"] = data_intel
 
     # Build profile summary
     overview = profile.get("overview", profile.get("basic_info", {}))
@@ -626,7 +656,6 @@ async def _build_analysis_questions(session_context: dict) -> dict:
     total_cells = rows * cols if rows and cols else 1
     missing_cells = missing_info.get("total_missing", 0) if isinstance(missing_info, dict) else 0
     if missing_cells == 0:
-        # Fallback: sum from variables
         for info in variables.values():
             missing_cells += info.get("missing", info.get("n_missing", 0))
     missing_pct = (missing_cells / total_cells * 100) if total_cells > 0 else 0
@@ -643,18 +672,40 @@ async def _build_analysis_questions(session_context: dict) -> dict:
         "memoryMB": round(memory_mb, 1),
     }
 
-    # Build target options from columns
+    # DataIntelligence 경고를 프로파일에 포함 (프론트엔드 표시용)
+    warnings = data_intel.get("data_warnings", [])
+    if warnings:
+        profile_summary["warnings"] = warnings
+
+    # Build target options — DataIntelligence 점수 순 반영
+    target_candidates = data_intel.get("target_candidates", [])
     recommended_target = detection.get("recommended_target")
-    problem_type = detection.get("problem_type") or detection.get("task_type") or "unknown"
+
+    # DI 상위 후보가 있으면 우선
+    if target_candidates and target_candidates[0]["score"] > 0.3:
+        recommended_target = target_candidates[0]["column"]
+
+    # DI가 추천 타겟을 변경했을 수 있으므로, 해당 타겟 기준으로 problem_type 재판정
+    if recommended_target and recommended_target in df.columns:
+        problem_type = DataIntelligence.infer_problem_type(df[recommended_target])
+    else:
+        problem_type = detection.get("problem_type") or detection.get("task_type") or "unknown"
 
     all_columns = list(df.columns)
     target_options = []
+    scored_cols = {c["column"]: c for c in target_candidates}
     for col in all_columns[:30]:
         opt = {"value": col, "label": col}
+        candidate = scored_cols.get(col)
         if col == recommended_target:
             opt["recommended"] = True
             unique_count = df[col].nunique()
-            opt["reason"] = f"고유값 {unique_count}개, 분류 대상으로 적합" if unique_count <= 20 else f"고유값 {unique_count}개"
+            reason_parts = [f"고유값 {unique_count}개"]
+            if candidate and candidate.get("reasons"):
+                reason_parts.extend(candidate["reasons"][:2])
+            opt["reason"] = ", ".join(reason_parts)
+        elif candidate and candidate.get("score", 0) > 0.2:
+            opt["reason"] = ", ".join(candidate.get("reasons", [])[:2])
         target_options.append(opt)
 
     # Problem type options
@@ -672,7 +723,16 @@ async def _build_analysis_questions(session_context: dict) -> dict:
             except (TypeError, ValueError):
                 pass
 
-    metric_options = _get_metric_options(problem_type)
+    # 적응형 메트릭 옵션 — 불균형 반영
+    imbalance = data_intel.get("class_imbalance", {})
+    metric_options = _get_metric_options_adaptive(problem_type, imbalance)
+
+    # 도메인 기반 분석 목표 자동 제안
+    domain_info = data_intel.get("domain", {})
+    domain = domain_info.get("domain", "general")
+    goal_placeholder = "예: 고위험 고객 식별, 매출 예측 등"
+    if domain != "general" and recommended_target:
+        goal_placeholder = f"예: {recommended_target} 예측 ({domain} 도메인 데이터 기반)"
 
     questions = [
         {
@@ -707,20 +767,40 @@ async def _build_analysis_questions(session_context: dict) -> dict:
             "type": "text",
             "label": "분석 목표 (선택사항)",
             "description": "분석의 비즈니스 목표를 간단히 설명해주세요.",
-            "placeholder": "예: 고위험 고객 식별, 매출 예측 등",
+            "placeholder": goal_placeholder,
             "required": False,
         },
     ]
 
+    # 이상치 감지 시 추가 질문
+    outlier_report = data_intel.get("outlier_report", {})
+    flagged = outlier_report.get("flagged_columns", [])
+    if flagged:
+        flagged_display = ", ".join(flagged[:5])
+        questions.append({
+            "id": "outlier_handling",
+            "type": "radio",
+            "label": "이상치 처리",
+            "description": f"컬럼 {flagged_display}에서 유의미한 이상치가 감지되었습니다.",
+            "required": False,
+            "defaultValue": "clip",
+            "options": [
+                {"value": "clip", "label": "클리핑 (권장)", "recommended": True, "reason": "IQR 기반으로 극단값을 경계값으로 조정"},
+                {"value": "remove", "label": "제거", "reason": "이상치 행을 제거"},
+                {"value": "keep", "label": "유지", "reason": "이상치를 그대로 유지"},
+            ],
+        })
+
     return _to_native_types({
         "profile": profile_summary,
         "questions": questions,
-        "_detection": detection,  # internal: keep for plan building
+        "_detection": detection,
+        "_data_intelligence": data_intel,
     })
 
 
 def _build_analysis_plan(answers: dict, session_context: dict) -> dict:
-    """사용자 응답 → 분석 계획 요약"""
+    """사용자 응답 → 분석 계획 요약 — 제약조건 자동 추출"""
     problem_type = answers.get("problem_type", "binary_classification")
     target = answers.get("target", "target")
     metric = answers.get("metric", "accuracy")
@@ -728,18 +808,35 @@ def _build_analysis_plan(answers: dict, session_context: dict) -> dict:
     if not goal.strip():
         goal = "데이터 분석 및 예측 모델 구축"
 
-    type_labels = {
-        "binary_classification": "이진 분류",
-        "multiclass_classification": "다중 분류",
-        "regression": "회귀",
-    }
+    # 사용자 목표에서 제약조건 추출
+    constraints = []
+    goal_lower = goal.lower()
+    if any(kw in goal_lower for kw in ["해석", "설명", "interpretable", "explainable"]):
+        constraints.append("해석 가능한 모델 선호")
+    if any(kw in goal_lower for kw in ["빠른", "fast", "실시간", "real-time"]):
+        constraints.append("추론 속도 중요")
+    if any(kw in goal_lower for kw in ["정확", "accurate", "높은 성능"]):
+        constraints.append("예측 정확도 최우선")
+
+    # DataIntelligence 경고를 constraints에 포함
+    data_intel = session_context.get("data_intelligence", {})
+    data_warnings = data_intel.get("data_warnings", [])
+    for warning in data_warnings[:3]:
+        constraints.append(warning)
+
+    # 이상치 처리 선택 반영
+    outlier_choice = answers.get("outlier_handling", "clip")
+    if outlier_choice == "remove":
+        constraints.append("이상치 행 제거 적용")
+    elif outlier_choice == "keep":
+        constraints.append("이상치 유지 (클리핑 미적용)")
 
     return {
         "analysisGoal": goal,
         "targetColumn": target,
         "problemType": problem_type,
         "evaluationMetric": metric,
-        "constraints": [],
+        "constraints": constraints,
         "estimatedDuration": "15~30분",
         "steps": [
             {"name": "문제 정의", "description": "분석 목표 및 타겟 확인"},
@@ -928,8 +1025,18 @@ async def _run_analysis_background(
         session_context["analysis_error"] = str(exc)
         logger.error("analysis_background_error", error=str(exc), session_id=session_id)
     finally:
-        # Persist to Redis
+        # Persist to Redis — strip non-serializable model objects first
         try:
+            _NON_SERIALIZABLE_KEYS = {
+                "model", "X_train", "X_test", "y_train", "y_test",
+                "predictions", "feature_names",
+            }
+            for ctx_key in ("model_data", "modeling"):
+                if ctx_key in session_context and isinstance(session_context[ctx_key], dict):
+                    session_context[ctx_key] = {
+                        k: v for k, v in session_context[ctx_key].items()
+                        if k not in _NON_SERIALIZABLE_KEYS
+                    }
             sanitized_ctx, _ = _sanitize_for_json(_to_native_types(session_context))
             session_data["context"] = sanitized_ctx
             session_data["updated_at"] = datetime.now().isoformat()
@@ -989,21 +1096,40 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 # 분석이 아직 실행 중 → 실패가 아님
                 logger.info("analysis_still_running", session_id=session_id)
             else:
-                # 태스크가 없거나 완료됨 → Redis 상태 불일치 → FAILED로 처리
-                session_context["analysis_state"] = "FAILED"
-                await websocket.send_json({
-                    "type": "status.update",
-                    "payload": {
-                        "sessionId": session_id,
-                        "step": 0,
-                        "totalSteps": 5,
-                        "stepName": "Analysis",
-                        "status": "failed",
-                        "progress": 0,
-                        "description": "연결이 끊어져 분석이 중단되었습니다.",
-                    }
-                })
-                logger.warning("session_state_reset", session_id=session_id, state="RUNNING->FAILED")
+                # 태스크가 없거나 완료됨 → 리포트 파일 존재 확인으로 복구 시도
+                from pathlib import Path
+                report_path = Path(settings.OUTPUTS_DIR) / "reports" / session_id / "report.md"
+                if report_path.exists():
+                    # 리포트가 존재 → 분석이 실제로 완료됨 (Redis 저장만 실패)
+                    session_context["analysis_state"] = "COMPLETED"
+                    await websocket.send_json({
+                        "type": "status.update",
+                        "payload": {
+                            "sessionId": session_id,
+                            "step": 5,
+                            "totalSteps": 5,
+                            "stepName": "Reporting",
+                            "status": "complete",
+                            "progress": 100,
+                            "description": "분석이 완료되었습니다! 리포트 페이지에서 결과를 확인하세요.",
+                        }
+                    })
+                    logger.info("session_state_recovered", session_id=session_id, state="RUNNING->COMPLETED")
+                else:
+                    session_context["analysis_state"] = "FAILED"
+                    await websocket.send_json({
+                        "type": "status.update",
+                        "payload": {
+                            "sessionId": session_id,
+                            "step": 0,
+                            "totalSteps": 5,
+                            "stepName": "Analysis",
+                            "status": "failed",
+                            "progress": 0,
+                            "description": "연결이 끊어져 분석이 중단되었습니다.",
+                        }
+                    })
+                    logger.warning("session_state_reset", session_id=session_id, state="RUNNING->FAILED")
         elif analysis_state == "FAILED":
             logger.info("session_state_restored", session_id=session_id, state="FAILED")
 

@@ -269,6 +269,14 @@ class OrchestratorAgent(BaseAgent):
                     normalized_result["file_id"] = self.context.data.get("file_id")
                 if "file_path" not in normalized_result:
                     normalized_result["file_path"] = self.context.data.get("file_path")
+                # DataIntelligence 전파 — 후속 에이전트(modeling, insight, reporting)가 접근 가능
+                if "data_intelligence" not in normalized_result:
+                    di = self.context.data.get("data_intelligence")
+                    if di:
+                        normalized_result["data_intelligence"] = di
+                        self.update_context("data_intelligence", di)
+                else:
+                    self.update_context("data_intelligence", normalized_result["data_intelligence"])
                 self.update_context("problem_definition", normalized_result)
             elif result_key == "research":
                 normalized_result = normalize_research_results(result.data)
@@ -355,13 +363,27 @@ class OrchestratorAgent(BaseAgent):
         except Exception as exc:
             self.logger.warning("workflow_state_persist_failed", error=str(exc))
 
+    # Keys in model_data that are non-serializable (DataFrame, ndarray, model objects)
+    _NON_SERIALIZABLE_KEYS = frozenset({
+        "model", "X_train", "X_test", "y_train", "y_test",
+        "predictions", "feature_names",
+    })
+
     def _persist_context(self) -> None:
-        """현재 컨텍스트를 세션 스토어에 저장"""
+        """현재 컨텍스트를 세션 스토어에 저장 (비직렬화 객체 제거)"""
         try:
+            data_copy = dict(self.context.data)
+            # model_data에서 비직렬화 키 제거 (원본은 메모리에서 유지)
+            for key in ("model_data", "modeling"):
+                if key in data_copy and isinstance(data_copy[key], dict):
+                    data_copy[key] = {
+                        k: v for k, v in data_copy[key].items()
+                        if k not in self._NON_SERIALIZABLE_KEYS
+                    }
             session_store = get_session_store()
             session_store.update_context(
                 self.context.session_id,
-                dict(self.context.data)
+                data_copy
             )
         except Exception as exc:
             self.logger.warning("context_persist_failed", error=str(exc))

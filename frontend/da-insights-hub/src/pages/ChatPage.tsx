@@ -76,6 +76,7 @@ export default function ChatPage() {
       })
       .catch((err) => {
         console.error('Failed to create session:', err);
+        toast.error('서버에 연결할 수 없습니다. 백엔드가 실행 중인지 확인해주세요.');
       })
       .finally(() => {
         sessionCreating.current = false;
@@ -97,6 +98,12 @@ export default function ChatPage() {
         case 'disconnected':
           setWsStatus('disconnected');
           break;
+
+        case 'error': {
+          const errPayload = event.payload as { message: string };
+          toast.error(errPayload.message || '연결 오류가 발생했습니다.');
+          break;
+        }
 
         case 'message.received': {
           const payload = event.payload as MessageReceivedPayload;

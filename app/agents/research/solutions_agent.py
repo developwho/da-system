@@ -39,10 +39,16 @@ class SolutionsAgent(BaseAgent):
             self.start_time = datetime.now()
             self.logger.info("Starting Kaggle solutions research")
 
-            # 1. 문제 정의에서 검색 쿼리 추출
+            # 1. 문제 정의에서 검색 쿼리 추출 (도메인 컨텍스트 포함)
             problem_definition = self.context.data.get("problem_definition", {})
             if not problem_definition:
                 raise ValueError("Problem definition not found in context")
+
+            # DataIntelligence 결과 병합
+            data_intel = self.context.data.get("data_intelligence", {})
+            if data_intel:
+                problem_definition = dict(problem_definition)
+                problem_definition["data_intelligence"] = data_intel
 
             query = self.kaggle_client.extract_query_from_problem(problem_definition)
             await self.emit_event("query_extracted", {"query": query})

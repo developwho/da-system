@@ -45,6 +45,11 @@ def normalize_problem_definition(data: Dict[str, Any]) -> Dict[str, Any]:
     if "evaluation_metric" not in normalized and "metric" in normalized:
         normalized["evaluation_metric"] = normalized.get("metric")
 
+    # DataIntelligence 필드 보존
+    for key in ("domain", "data_intelligence", "class_imbalance", "data_warnings"):
+        if key in data:
+            normalized[key] = data[key]
+
     return normalized
 
 

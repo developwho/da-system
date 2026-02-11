@@ -11,7 +11,7 @@ from app.config import settings
 from app.utils.logger import get_logger
 from app.api.deps import require_api_key
 
-router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(require_api_key)])
+router = APIRouter(tags=["reports"], dependencies=[Depends(require_api_key)])
 logger = get_logger(__name__)
 
 

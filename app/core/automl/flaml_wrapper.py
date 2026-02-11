@@ -44,7 +44,8 @@ class FLAMLWrapper:
         self,
         X: pd.DataFrame,
         y: pd.Series,
-        progress_callback: Callable[[float], None] = None
+        progress_callback: Callable[[float], None] = None,
+        sample_weight: np.ndarray = None
     ) -> Dict[str, Any]:
         """
         모델 학습
@@ -53,53 +54,56 @@ class FLAMLWrapper:
             X: 피처 데이터프레임
             y: 타겟 시리즈
             progress_callback: 진행률 콜백 함수
+            sample_weight: 불균형 처리용 샘플 가중치
 
         Returns:
             학습 결과
         """
         logger.info("flaml_training_started", rows=len(X), columns=len(X.columns))
 
-        # Train/Test 분할
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+        # Train/Test 분할 (분류 문제 시 층화추출)
+        is_classification = "classification" in self.task_type
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42,
+                stratify=y if is_classification else None
+            )
+        except ValueError:
+            # 층화 실패 시 (클래스당 샘플 부족 등) 일반 분할
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+
+        # sample_weight도 동일하게 분할
+        sw_train = None
+        if sample_weight is not None and len(sample_weight) == len(X):
+            train_idx = X_train.index
+            sw_train = sample_weight[X.index.get_indexer(train_idx)]
+            if (sw_train < 0).any() or np.isnan(sw_train).any():
+                sw_train = None
+                logger.warning("sample_weight_invalid_after_split")
 
         # FLAML 설정 생성
         flaml_config = self._get_flaml_config()
 
-        # region agent log
-        try:
-            y_unique = int(y.nunique(dropna=False))
-        except Exception:
-            y_unique = None
-        with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "sessionId": "debug-session",
-                "runId": "pre-fix",
-                "hypothesisId": "H1",
-                "location": "app/core/automl/flaml_wrapper.py:68",
-                "message": "flaml_config_built",
-                "data": {
-                    "task_type": self.task_type,
-                    "flaml_task": flaml_config.get("task"),
-                    "metric": flaml_config.get("metric"),
-                    "estimator_list": flaml_config.get("estimator_list"),
-                    "y_unique": y_unique,
-                    "y_dtype": str(getattr(y, "dtype", "unknown")),
-                },
-                "timestamp": int(time.time() * 1000),
-            }, ensure_ascii=False) + "\n")
-        # endregion
+        logger.debug("flaml_config_built",
+                      task_type=self.task_type,
+                      flaml_task=flaml_config.get("task"),
+                      metric=flaml_config.get("metric"))
 
         # AutoML 객체 생성
         self.automl = AutoML()
 
         # 학습 시작
-        self.automl.fit(
+        fit_kwargs = dict(
             X_train=X_train,
             y_train=y_train,
             **flaml_config
         )
+        if sw_train is not None:
+            fit_kwargs["sample_weight"] = sw_train
+
+        self.automl.fit(**fit_kwargs)
 
         # 최적 모델 저장
         self.model = self.automl.model
@@ -107,21 +111,6 @@ class FLAMLWrapper:
 
         # 모델 학습 실패 확인
         if self.model is None or self.automl.best_estimator is None:
-            # region agent log
-            with open(r"d:\dasystem\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "sessionId": "debug-session",
-                    "runId": "pre-fix",
-                    "hypothesisId": "H1",
-                    "location": "app/core/automl/flaml_wrapper.py:96",
-                    "message": "flaml_no_model",
-                    "data": {
-                        "best_loss": str(self.automl.best_loss),
-                        "best_estimator": str(self.automl.best_estimator),
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }, ensure_ascii=False) + "\n")
-            # endregion
             logger.error("flaml_training_failed_no_model", best_loss=self.automl.best_loss)
             raise ValueError(
                 "FLAML failed to train any model. "
@@ -377,6 +366,9 @@ class FLAMLWrapper:
             # Tree 기반 모델의 feature_importances_
             if hasattr(self.model, "feature_importances_"):
                 importances = self.model.feature_importances_
+                total = importances.sum()
+                if total > 0:
+                    importances = importances / total
                 return dict(zip(feature_names, importances.tolist()))
 
             # 선형 모델의 coef_
@@ -384,7 +376,11 @@ class FLAMLWrapper:
                 coef = self.model.coef_
                 if len(coef.shape) > 1:
                     coef = np.abs(coef).mean(axis=0)
-                return dict(zip(feature_names, np.abs(coef).tolist()))
+                abs_coef = np.abs(coef)
+                total = abs_coef.sum()
+                if total > 0:
+                    abs_coef = abs_coef / total
+                return dict(zip(feature_names, abs_coef.tolist()))
 
         except Exception as e:
             logger.warning("feature_importance_extraction_failed", error=str(e))
