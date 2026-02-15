@@ -1,0 +1,1711 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LPG/도시가스 가격 예측 분석 리포트 - DA System</title>
+    <style>
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+    :root {
+        --primary: #0F172A;
+        --primary-mid: #1E293B;
+        --body: #475569;
+        --muted: #94A3B8;
+        --accent: #2563EB;
+        --accent-light: #3B82F6;
+        --accent-bg: #EFF6FF;
+        --accent-bg-deep: #DBEAFE;
+        --success: #059669;
+        --success-bg: #ECFDF5;
+        --warning: #D97706;
+        --warning-bg: #FFFBEB;
+        --danger: #DC2626;
+        --danger-bg: #FEF2F2;
+        --border: #E2E8F0;
+        --border-light: #F1F5F9;
+        --divider: #CBD5E1;
+        --bg: #FFFFFF;
+        --bg-subtle: #F8FAFC;
+        --bg-muted: #F1F5F9;
+        --font: 'Pretendard Variable', 'Pretendard', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+        font-family: var(--font);
+        font-size: 15px;
+        line-height: 1.75;
+        color: var(--body);
+        background: #F0F2F5;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        counter-reset: page-counter;
+    }
+
+    /* ── Report Container ── */
+    .report {
+        max-width: 960px;
+        margin: 0 auto;
+        background: var(--bg);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+    }
+
+    /* ═══════════════════════════════════════════
+       COVER PAGE
+       ═══════════════════════════════════════════ */
+    .cover {
+        padding: 72px 64px 56px;
+        border-bottom: 4px solid var(--accent);
+        position: relative;
+        min-height: 420px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .cover-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 48px;
+    }
+    .cover-brand {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        color: var(--accent);
+    }
+    .cover-confidential {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--danger);
+        border: 1.5px solid var(--danger);
+        padding: 4px 12px;
+        border-radius: 2px;
+    }
+    .cover-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .cover-title {
+        font-size: 36px;
+        font-weight: 800;
+        color: var(--primary);
+        line-height: 1.2;
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
+    }
+    .cover-subtitle {
+        font-size: 18px;
+        font-weight: 400;
+        color: var(--muted);
+        margin-bottom: 24px;
+        line-height: 1.4;
+    }
+    .cover-badges {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 40px;
+    }
+    .cover-badge {
+        display: inline-block;
+        padding: 5px 16px;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 100px;
+    }
+    .cover-badge.type {
+        color: var(--accent);
+        background: var(--accent-bg);
+    }
+    .cover-badge.domain {
+        color: var(--success);
+        background: var(--success-bg);
+    }
+    .cover-badge.version {
+        color: var(--muted);
+        background: var(--bg-muted);
+    }
+    .cover-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        border-top: 1px solid var(--border);
+        padding-top: 24px;
+    }
+    .cover-meta-item {
+        padding: 0 16px;
+        border-right: 1px solid var(--border);
+    }
+    .cover-meta-item:first-child { padding-left: 0; }
+    .cover-meta-item:last-child { border-right: none; }
+    .cover-meta-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 4px;
+    }
+    .cover-meta-value {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--primary);
+    }
+
+    /* ═══════════════════════════════════════════
+       TABLE OF CONTENTS
+       ═══════════════════════════════════════════ */
+    .toc {
+        padding: 40px 64px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-subtle);
+    }
+    .toc-title {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 20px;
+    }
+    .toc-list {
+        list-style: none;
+        columns: 2;
+        column-gap: 48px;
+    }
+    .toc-item {
+        break-inside: avoid;
+        margin-bottom: 8px;
+    }
+    .toc-item a {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        text-decoration: none;
+        color: var(--body);
+        font-size: 14px;
+        padding: 6px 0;
+        transition: color 0.15s;
+    }
+    .toc-item a:hover {
+        color: var(--accent);
+    }
+    .toc-num {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--divider);
+        min-width: 24px;
+    }
+    .toc-label {
+        font-weight: 500;
+    }
+    .toc-dots {
+        flex: 1;
+        border-bottom: 1px dotted var(--divider);
+        margin: 0 4px;
+        min-width: 20px;
+        align-self: center;
+        transform: translateY(-3px);
+    }
+
+    /* ═══════════════════════════════════════════
+       CONTENT AREA
+       ═══════════════════════════════════════════ */
+    .content {
+        padding: 56px 64px 64px;
+    }
+
+    /* ── Section Header ── */
+    .section {
+        margin-bottom: 56px;
+        page-break-inside: avoid;
+    }
+    .section-header {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        margin-bottom: 6px;
+    }
+    .section-number {
+        font-size: 32px;
+        font-weight: 800;
+        color: var(--border);
+        line-height: 1;
+        min-width: 40px;
+        letter-spacing: -1px;
+    }
+    .section-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--primary);
+        line-height: 1.3;
+    }
+    .section-divider {
+        height: 1px;
+        background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+        margin-bottom: 28px;
+    }
+
+    /* ═══════════════════════════════════════════
+       HERO KPI (Executive Summary)
+       ═══════════════════════════════════════════ */
+    .hero-verdict {
+        background: linear-gradient(135deg, var(--accent-bg) 0%, var(--bg) 100%);
+        border: 1px solid var(--accent-bg-deep);
+        border-radius: 12px;
+        padding: 28px 32px;
+        margin: 24px 0;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+    }
+    .hero-verdict-icon {
+        width: 52px;
+        height: 52px;
+        background: var(--accent);
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .hero-verdict-icon svg {
+        width: 28px;
+        height: 28px;
+        fill: white;
+    }
+    .hero-verdict-text {
+        flex: 1;
+    }
+    .hero-verdict-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 4px;
+    }
+    .hero-verdict-message {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--primary);
+        line-height: 1.45;
+    }
+    .hero-verdict-grade {
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .hero-verdict-grade-value {
+        font-size: 40px;
+        font-weight: 800;
+        color: var(--success);
+        line-height: 1;
+    }
+    .hero-verdict-grade-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+        margin-top: 4px;
+    }
+
+    /* ── KPI Cards ── */
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin: 24px 0;
+    }
+    .kpi-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--border);
+    }
+    .kpi-card.success::before { background: var(--success); }
+    .kpi-card.warning::before { background: var(--warning); }
+    .kpi-card.accent::before  { background: var(--accent); }
+    .kpi-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--muted);
+        margin-bottom: 8px;
+    }
+    .kpi-value {
+        font-size: 30px;
+        font-weight: 800;
+        color: var(--primary);
+        line-height: 1.1;
+        letter-spacing: -0.5px;
+    }
+    .kpi-value.success { color: var(--success); }
+    .kpi-value.warning { color: var(--warning); }
+    .kpi-value.danger  { color: var(--danger); }
+    .kpi-value.accent  { color: var(--accent); }
+    .kpi-hint {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 6px;
+        line-height: 1.35;
+    }
+
+    /* ── SCR Bullets (Situation-Complication-Resolution) ── */
+    .scr-list {
+        list-style: none;
+        margin: 20px 0;
+    }
+    .scr-item {
+        display: flex;
+        gap: 14px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-light);
+        align-items: flex-start;
+    }
+    .scr-item:last-child { border-bottom: none; }
+    .scr-marker {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+        margin-top: 8px;
+    }
+    .scr-text {
+        font-size: 15px;
+        color: var(--body);
+        line-height: 1.65;
+    }
+
+    /* ═══════════════════════════════════════════
+       PULL QUOTE / HERO STAT
+       ═══════════════════════════════════════════ */
+    .pull-quote {
+        margin: 32px 0;
+        padding: 32px 40px;
+        background: var(--bg-subtle);
+        border-left: 4px solid var(--accent);
+        border-radius: 0 8px 8px 0;
+    }
+    .pull-quote-value {
+        font-size: 42px;
+        font-weight: 800;
+        color: var(--accent);
+        line-height: 1;
+        margin-bottom: 8px;
+        letter-spacing: -1px;
+    }
+    .pull-quote-text {
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--primary);
+        line-height: 1.5;
+    }
+    .pull-quote-sub {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 4px;
+    }
+
+    /* ═══════════════════════════════════════════
+       TABLES
+       ═══════════════════════════════════════════ */
+
+    /* Dotted Table */
+    .dotted-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0;
+    }
+    .dotted-table tr {
+        border-bottom: 1px dotted var(--divider);
+    }
+    .dotted-table tr:last-child {
+        border-bottom: none;
+    }
+    .dotted-table td {
+        padding: 10px 0;
+        font-size: 14px;
+        vertical-align: top;
+    }
+    .dotted-table td:first-child {
+        font-weight: 600;
+        color: var(--primary);
+        width: 180px;
+        padding-right: 24px;
+    }
+
+    /* Data Table */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0;
+        font-size: 14px;
+    }
+    .data-table th {
+        text-align: left;
+        padding: 12px 16px;
+        font-weight: 700;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        border-bottom: 2px solid var(--primary-mid);
+        background: var(--bg-subtle);
+    }
+    .data-table th.num {
+        text-align: right;
+    }
+    .data-table td {
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--border-light);
+        color: var(--body);
+    }
+    .data-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+    }
+    .data-table tr:last-child td {
+        border-bottom: none;
+    }
+    .data-table tr:hover td {
+        background: var(--bg-subtle);
+    }
+    .data-table tr.champion td {
+        font-weight: 700;
+        color: var(--primary);
+        background: var(--accent-bg);
+    }
+    .data-table .indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+    .indicator.green  { background: var(--success); }
+    .indicator.yellow { background: var(--warning); }
+    .indicator.red    { background: var(--danger); }
+    .indicator.blue   { background: var(--accent); }
+
+    /* ── Model Comparison Bar Chart ── */
+    .model-compare {
+        margin: 24px 0;
+    }
+    .model-bar-row {
+        display: grid;
+        grid-template-columns: 140px 1fr 60px;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+    }
+    .model-bar-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--primary);
+        text-align: right;
+    }
+    .model-bar-name.champion-label {
+        color: var(--accent);
+    }
+    .model-bar-track {
+        height: 28px;
+        background: var(--bg-muted);
+        border-radius: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+    .model-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    .model-bar-fill.rank-1 { background: var(--accent); }
+    .model-bar-fill.rank-2 { background: var(--accent-light); }
+    .model-bar-fill.rank-3 { background: #93C5FD; }
+    .model-bar-fill.rank-4 { background: #CBD5E1; }
+    .model-bar-score {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--primary);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+    .model-bar-score.champion-score { color: var(--accent); }
+    .model-compare-caption {
+        font-size: 12px;
+        color: var(--muted);
+        text-align: center;
+        margin-top: 8px;
+        font-style: italic;
+    }
+
+    /* ═══════════════════════════════════════════
+       SHAP / FEATURE IMPORTANCE (CSS-only)
+       ═══════════════════════════════════════════ */
+    .shap-chart {
+        margin: 24px 0;
+    }
+    .shap-bar-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+        gap: 12px;
+    }
+    .shap-bar-label {
+        width: 160px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--primary);
+        text-align: right;
+        flex-shrink: 0;
+        font-variant-numeric: tabular-nums;
+    }
+    .shap-bar-track {
+        flex: 1;
+        height: 26px;
+        background: var(--bg-muted);
+        border-radius: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+    .shap-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.6s ease;
+    }
+    .shap-bar-fill.rank-1 { background: var(--accent); }
+    .shap-bar-fill.rank-2 { background: var(--accent-light); }
+    .shap-bar-fill.rank-3 { background: #60A5FA; }
+    .shap-bar-fill.rank-4 { background: #93C5FD; }
+    .shap-bar-fill.rank-5 { background: #BFDBFE; }
+    .shap-bar-fill.rank-6 { background: #DBEAFE; }
+    .shap-bar-value {
+        width: 56px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--primary);
+        flex-shrink: 0;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* ═══════════════════════════════════════════
+       CALLOUTS & ALERTS
+       ═══════════════════════════════════════════ */
+    .callout {
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin: 16px 0;
+        font-size: 14px;
+        line-height: 1.65;
+    }
+    .callout.info {
+        background: var(--accent-bg);
+        border-left: 3px solid var(--accent);
+        color: #1E40AF;
+    }
+    .callout.success {
+        background: var(--success-bg);
+        border-left: 3px solid var(--success);
+        color: #065F46;
+    }
+    .callout.warning {
+        background: var(--warning-bg);
+        border-left: 3px solid var(--warning);
+        color: #92400E;
+    }
+    .callout-title {
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+    }
+
+    /* ── Preprocessing Badges ── */
+    .prep-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+    }
+    .prep-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        background: #F0FDF4;
+        color: #166534;
+        border-radius: 100px;
+        border: 1px solid #BBF7D0;
+    }
+    .prep-badge::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #22C55E;
+    }
+
+    /* ═══════════════════════════════════════════
+       FIGURES
+       ═══════════════════════════════════════════ */
+    .figure {
+        margin: 28px 0;
+        page-break-inside: avoid;
+    }
+    .figure-caption {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--primary);
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .figure-frame {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-subtle);
+        padding: 24px;
+    }
+    .figure-interp {
+        font-size: 13px;
+        color: var(--body);
+        margin-top: 12px;
+        line-height: 1.65;
+        padding: 12px 16px;
+        background: var(--bg-subtle);
+        border-radius: 6px;
+        border-left: 3px solid var(--border);
+    }
+
+    /* ═══════════════════════════════════════════
+       RECOMMENDATION CARDS
+       ═══════════════════════════════════════════ */
+    .rec-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin: 12px 0;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        transition: box-shadow 0.15s;
+    }
+    .rec-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .rec-left {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        min-width: 72px;
+    }
+    .rec-priority {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        padding: 3px 10px;
+        border-radius: 4px;
+        white-space: nowrap;
+    }
+    .rec-priority.high   { background: #FEE2E2; color: var(--danger); }
+    .rec-priority.medium { background: #FEF3C7; color: var(--warning); }
+    .rec-priority.low    { background: #D1FAE5; color: var(--success); }
+    .rec-number {
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--border);
+    }
+    .rec-body {
+        flex: 1;
+    }
+    .rec-text {
+        font-size: 14px;
+        color: var(--body);
+        line-height: 1.6;
+        margin-bottom: 6px;
+    }
+    .rec-impact {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        gap: 16px;
+    }
+    .rec-impact span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .rec-impact-tag {
+        font-weight: 600;
+        color: var(--primary-mid);
+    }
+
+    /* ═══════════════════════════════════════════
+       METHODOLOGY SECTION
+       ═══════════════════════════════════════════ */
+    .method-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin: 20px 0;
+    }
+    .method-card {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+    }
+    .method-card-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+    }
+    .method-card-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--primary);
+        margin-bottom: 4px;
+    }
+    .method-card-desc {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.5;
+    }
+
+    /* ═══════════════════════════════════════════
+       APPENDIX (COLLAPSIBLE)
+       ═══════════════════════════════════════════ */
+    .appendix-details {
+        margin: 16px 0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .appendix-details summary {
+        padding: 14px 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--primary);
+        background: var(--bg-subtle);
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: background 0.15s;
+    }
+    .appendix-details summary:hover {
+        background: var(--bg-muted);
+    }
+    .appendix-details summary::before {
+        content: '';
+        width: 0;
+        height: 0;
+        border-left: 5px solid var(--muted);
+        border-top: 4px solid transparent;
+        border-bottom: 4px solid transparent;
+        transition: transform 0.2s;
+    }
+    .appendix-details[open] summary::before {
+        transform: rotate(90deg);
+    }
+    .appendix-details summary::-webkit-details-marker { display: none; }
+    .appendix-content {
+        padding: 20px;
+        border-top: 1px solid var(--border);
+    }
+
+    /* ── Prose ── */
+    .prose p {
+        margin-bottom: 14px;
+    }
+    .prose p:last-child {
+        margin-bottom: 0;
+    }
+    .prose ul, .prose ol {
+        padding-left: 20px;
+        margin-bottom: 14px;
+    }
+    .prose li {
+        margin-bottom: 6px;
+    }
+    .prose strong {
+        color: var(--primary-mid);
+        font-weight: 700;
+    }
+
+    /* ═══════════════════════════════════════════
+       FOOTER
+       ═══════════════════════════════════════════ */
+    .report-footer {
+        padding: 24px 64px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--muted);
+    }
+    .footer-left {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    .footer-brand {
+        font-weight: 700;
+        color: var(--primary-mid);
+    }
+    .footer-divider {
+        width: 1px;
+        height: 12px;
+        background: var(--divider);
+    }
+    .footer-disclaimer {
+        max-width: 420px;
+        line-height: 1.4;
+    }
+
+    /* ═══════════════════════════════════════════
+       PRINT STYLES
+       ═══════════════════════════════════════════ */
+    @media print {
+        body {
+            background: white;
+            font-size: 10.5pt;
+            color: #1a1a1a;
+        }
+        .report {
+            max-width: none;
+            box-shadow: none;
+            margin: 0;
+        }
+        .cover {
+            padding: 2cm;
+            page-break-after: always;
+            min-height: auto;
+        }
+        .toc {
+            padding: 1.5cm 2cm;
+            page-break-after: always;
+        }
+        .content {
+            padding: 1.5cm 2cm;
+        }
+        .section {
+            page-break-inside: avoid;
+        }
+        .kpi-grid {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        .kpi-card {
+            border: 1px solid #ccc;
+        }
+        .kpi-card::before { display: none; }
+        .kpi-value { color: #000 !important; }
+        .callout { border-left-width: 2px; }
+        .figure-frame { border: 1px solid #ccc; }
+        .hero-verdict { border: 1px solid #ccc; background: #f5f5f5; }
+        .hero-verdict-icon { background: #333; }
+        .pull-quote { border-left-width: 3px; background: #f5f5f5; }
+        .pull-quote-value { color: #000 !important; }
+        .rec-card:hover { box-shadow: none; }
+        .appendix-details { border: 1px solid #ccc; }
+        .appendix-details[open] .appendix-content { border-top: 1px solid #ccc; }
+        .report-footer {
+            padding: 1cm 2cm;
+        }
+        /* CSS page counter */
+        .content .section {
+            counter-increment: page-counter;
+        }
+        @page {
+            size: A4;
+            margin: 2cm;
+            @bottom-right {
+                content: counter(page);
+                font-size: 9pt;
+                color: #999;
+            }
+        }
+    }
+    </style>
+</head>
+<body>
+    <div class="report">
+
+        <!-- ═══════════════════════════════════════
+             COVER PAGE
+             ═══════════════════════════════════════ -->
+        <div class="cover">
+            <div class="cover-top">
+                <div class="cover-brand">DA SYSTEM</div>
+                <div class="cover-confidential">Confidential</div>
+            </div>
+
+            <div class="cover-body">
+                <div class="cover-title">LPG/도시가스 가격 예측 분석</div>
+                <div class="cover-subtitle">국제 에너지 가격 변동 요인 정량화 및 머신러닝 기반 판매 단가 예측 모델 구축</div>
+                <div class="cover-badges">
+                    <span class="cover-badge type">Regression</span>
+                    <span class="cover-badge domain">Energy</span>
+                    <span class="cover-badge version">v1.0</span>
+                </div>
+            </div>
+
+            <div class="cover-meta-grid">
+                <div class="cover-meta-item">
+                    <div class="cover-meta-label">Date</div>
+                    <div class="cover-meta-value">2025-10-20</div>
+                </div>
+                <div class="cover-meta-item">
+                    <div class="cover-meta-label">Prepared For</div>
+                    <div class="cover-meta-value">Energy Planning Team</div>
+                </div>
+                <div class="cover-meta-item">
+                    <div class="cover-meta-label">Model</div>
+                    <div class="cover-meta-value">LightGBM</div>
+                </div>
+                <div class="cover-meta-item">
+                    <div class="cover-meta-label">Session</div>
+                    <div class="cover-meta-value">session-1</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════
+             TABLE OF CONTENTS
+             ═══════════════════════════════════════ -->
+        <div class="toc">
+            <div class="toc-title">Contents</div>
+            <ul class="toc-list">
+                <li class="toc-item">
+                    <a href="#section-1">
+                        <span class="toc-num">01</span>
+                        <span class="toc-label">Executive Summary</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-2">
+                        <span class="toc-num">02</span>
+                        <span class="toc-label">Problem Definition</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-3">
+                        <span class="toc-num">03</span>
+                        <span class="toc-label">Data Quality & Preprocessing</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-4">
+                        <span class="toc-num">04</span>
+                        <span class="toc-label">Prior Research</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-5">
+                        <span class="toc-num">05</span>
+                        <span class="toc-label">Methodology</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-6">
+                        <span class="toc-num">06</span>
+                        <span class="toc-label">Modeling Results</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-7">
+                        <span class="toc-num">07</span>
+                        <span class="toc-label">Feature Importance (SHAP)</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-8">
+                        <span class="toc-num">08</span>
+                        <span class="toc-label">Key Insights</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-9">
+                        <span class="toc-num">09</span>
+                        <span class="toc-label">Recommendations</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+                <li class="toc-item">
+                    <a href="#section-10">
+                        <span class="toc-num">10</span>
+                        <span class="toc-label">Appendix</span>
+                        <span class="toc-dots"></span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="content">
+
+            <!-- ═══════════════════════════════════════
+                 01 EXECUTIVE SUMMARY
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-1">
+                <div class="section-header">
+                    <span class="section-number">01</span>
+                    <span class="section-title">Executive Summary</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <!-- Hero Verdict -->
+                <div class="hero-verdict">
+                    <div class="hero-verdict-icon">
+                        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                    </div>
+                    <div class="hero-verdict-text">
+                        <div class="hero-verdict-label">Analysis Verdict</div>
+                        <div class="hero-verdict-message">LightGBM 기반 예측 모델이 R&sup2;=0.94, MAPE=4.8%로 <strong>높은 실용 정확도</strong>를 달성했으며, CP 가격 모니터링만으로 판매 단가의 방향성을 상당 부분 예측할 수 있습니다.</div>
+                    </div>
+                    <div class="hero-verdict-grade">
+                        <div class="hero-verdict-grade-value">A</div>
+                        <div class="hero-verdict-grade-label">Model Grade</div>
+                    </div>
+                </div>
+
+                <!-- KPI Cards -->
+                <div class="kpi-grid">
+                    <div class="kpi-card success">
+                        <div class="kpi-label">R&sup2;</div>
+                        <div class="kpi-value success">0.94</div>
+                        <div class="kpi-hint">모델 설명력</div>
+                    </div>
+                    <div class="kpi-card success">
+                        <div class="kpi-label">MAPE</div>
+                        <div class="kpi-value success">4.8%</div>
+                        <div class="kpi-hint">평균 절대 백분율 오차</div>
+                    </div>
+                    <div class="kpi-card accent">
+                        <div class="kpi-label">RMSE</div>
+                        <div class="kpi-value accent">1.18</div>
+                        <div class="kpi-hint">원/kg</div>
+                    </div>
+                    <div class="kpi-card accent">
+                        <div class="kpi-label">MAE</div>
+                        <div class="kpi-value accent">0.82</div>
+                        <div class="kpi-hint">원/kg</div>
+                    </div>
+                </div>
+
+                <!-- SCR Bullets -->
+                <ul class="scr-list">
+                    <li class="scr-item">
+                        <div class="scr-marker"></div>
+                        <div class="scr-text"><strong>Situation:</strong> LPG/도시가스 판매 단가는 국제 CP 가격, JKM 현물가, 유가 등 복합적 요인에 의해 결정되며, 수동 예측은 평균 12~15% 오차율을 보입니다.</div>
+                    </li>
+                    <li class="scr-item">
+                        <div class="scr-marker"></div>
+                        <div class="scr-text"><strong>Complication:</strong> 80개월 간 7개 변수의 비선형적 상호작용이 존재하며, 특히 환율 1,400원 구간에서 급격한 임계효과가 발생합니다.</div>
+                    </li>
+                    <li class="scr-item">
+                        <div class="scr-marker"></div>
+                        <div class="scr-text"><strong>Resolution:</strong> LightGBM AutoML 모델이 MAPE 4.8%를 달성하여 수동 예측 대비 <strong>~70% 오차 절감</strong>이 가능하며, CP+JKM+유가 3개 지표 모니터링으로 81.1% 예측력을 확보합니다.</div>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 02 PROBLEM DEFINITION
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-2">
+                <div class="section-header">
+                    <span class="section-number">02</span>
+                    <span class="section-title">Problem Definition</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <table class="dotted-table">
+                    <tr><td>Goal</td><td>LPG/도시가스 판매 단가의 주요 변동 요인을 정량화하고 예측 모델 구축</td></tr>
+                    <tr><td>Problem Type</td><td>Regression (연속값 예측)</td></tr>
+                    <tr><td>Target Variable</td><td><code>lpg_retail_price</code> (원/kg)</td></tr>
+                    <tr><td>Evaluation Metric</td><td>RMSE (주 지표), MAPE, R&sup2; (보조 지표)</td></tr>
+                    <tr><td>Validation</td><td>80:20 홀드아웃 (시계열 특성 반영, 최근 데이터를 테스트셋으로 분리)</td></tr>
+                    <tr><td>Constraint</td><td>MAPE &lt; 10% (실무 활용 임계치)</td></tr>
+                </table>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 03 DATA QUALITY & PREPROCESSING
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-3">
+                <div class="section-header">
+                    <span class="section-number">03</span>
+                    <span class="section-title">Data Quality &amp; Preprocessing</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="callout info">
+                    <div class="callout-title">Domain Detection</div>
+                    Detected Domain: <strong>Energy</strong> (confidence: high) — 국제 에너지 가격 및 수요 지표 기반
+                </div>
+
+                <table class="dotted-table">
+                    <tr><td>Rows</td><td>80 (월별, 2018-03 ~ 2024-10)</td></tr>
+                    <tr><td>Columns</td><td>7개 예측변수 + 1개 타겟</td></tr>
+                    <tr><td>Missing Values</td><td>0 (0.0%) — 결측 없음</td></tr>
+                    <tr><td>Duplicate Rows</td><td>0</td></tr>
+                    <tr><td>Target Range</td><td>14.2 ~ 32.8 원/kg (std: 4.12)</td></tr>
+                </table>
+
+                <div class="prose"><p><strong>Applied Preprocessing:</strong></p></div>
+                <div class="prep-badges">
+                    <span class="prep-badge">라벨 인코딩</span>
+                    <span class="prep-badge">결측값 처리</span>
+                    <span class="prep-badge">이상치 클리핑</span>
+                    <span class="prep-badge">저분산 제거</span>
+                </div>
+
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Variable</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                            <th class="num">Mean</th>
+                            <th class="num">Std</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>cp_price</td><td>float64</td><td>사우디 아람코 CP ($/톤)</td><td class="num">485.3</td><td class="num">142.7</td></tr>
+                        <tr><td>jkm_price</td><td>float64</td><td>JKM 현물가격 ($/MMBTU)</td><td class="num">12.4</td><td class="num">8.6</td></tr>
+                        <tr><td>brent_crude</td><td>float64</td><td>브렌트유 현물가격 ($/배럴)</td><td class="num">72.1</td><td class="num">18.3</td></tr>
+                        <tr><td>heating_demand_idx</td><td>float64</td><td>난방 수요 지수</td><td class="num">58.2</td><td class="num">24.1</td></tr>
+                        <tr><td>usd_krw</td><td>float64</td><td>원/달러 환율</td><td class="num">1,198</td><td class="num">92.4</td></tr>
+                        <tr><td>season</td><td>category</td><td>계절 (봄/여름/가을/겨울)</td><td class="num">—</td><td class="num">—</td></tr>
+                        <tr><td>inventory_level</td><td>float64</td><td>LPG 재고 수준 (천톤)</td><td class="num">312.8</td><td class="num">45.6</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 04 PRIOR RESEARCH
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-4">
+                <div class="section-header">
+                    <span class="section-number">04</span>
+                    <span class="section-title">Prior Research</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="prose"><p><strong>Academic Papers:</strong> 3 relevant papers reviewed</p></div>
+
+                <table class="data-table">
+                    <thead>
+                        <tr><th>Title</th><th>Source</th><th>Relevance</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>LPG Price Forecasting Using Machine Learning with CP Index</td>
+                            <td>HuggingFace Papers</td>
+                            <td><span class="indicator green"></span>High</td>
+                        </tr>
+                        <tr>
+                            <td>Natural Gas Price Prediction: A Gradient Boosting Approach</td>
+                            <td>HuggingFace Papers</td>
+                            <td><span class="indicator green"></span>High</td>
+                        </tr>
+                        <tr>
+                            <td>Energy Commodity Pricing: JKM and CP Dynamics in Asia-Pacific</td>
+                            <td>HuggingFace Papers</td>
+                            <td><span class="indicator yellow"></span>Medium</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="prose" style="margin-top: 20px;"><p><strong>Kaggle Solutions:</strong> Energy Price Forecasting Competition</p></div>
+                <div class="prose">
+                    <ul>
+                        <li><strong>1st Place:</strong> LightGBM with lag features (MAPE 3.2%)</li>
+                        <li><strong>2nd Place:</strong> XGBoost ensemble with external macro data (MAPE 3.8%)</li>
+                        <li><strong>3rd Place:</strong> LSTM + Gradient Boosting hybrid (MAPE 4.1%)</li>
+                    </ul>
+                </div>
+
+                <div class="callout info">
+                    <div class="callout-title">Deep Research Summary</div>
+                    LPG 가격은 사우디 아람코 CP(Contract Price)에 의해 지배적으로 결정되며, JKM 현물가와 국제 유가가 보조 지표로 작용합니다. 최근 연구에서 Gradient Boosting 계열 모델이 시계열 ARIMA 대비 15-20% 높은 예측 정확도를 보였습니다.
+                </div>
+
+                <div class="prose"><p><strong>Research-Recommended Models:</strong> LightGBM, XGBoost, CatBoost</p></div>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 05 METHODOLOGY (NEW)
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-5">
+                <div class="section-header">
+                    <span class="section-number">05</span>
+                    <span class="section-title">Methodology</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="method-grid">
+                    <div class="method-card">
+                        <div class="method-card-label">AutoML Framework</div>
+                        <div class="method-card-value">FLAML</div>
+                        <div class="method-card-desc">Fast Lightweight AutoML. Cost-effective hyperparameter optimization with early stopping.</div>
+                    </div>
+                    <div class="method-card">
+                        <div class="method-card-label">Validation Strategy</div>
+                        <div class="method-card-value">Holdout 80:20</div>
+                        <div class="method-card-desc">최근 16개월을 테스트셋으로 분리. 시계열 순서를 유지하여 데이터 유출 방지.</div>
+                    </div>
+                    <div class="method-card">
+                        <div class="method-card-label">Explainability</div>
+                        <div class="method-card-value">SHAP</div>
+                        <div class="method-card-desc">SHapley Additive exPlanations. 각 변수의 개별 예측 기여도를 정량적으로 분해.</div>
+                    </div>
+                </div>
+
+                <div class="prose">
+                    <p><strong>Search Space:</strong> 선행연구 결과를 반영하여 LightGBM, XGBoost, CatBoost, RandomForest, Linear Regression 5개 모델을 탐색 대상으로 설정했습니다. FLAML이 각 모델의 하이퍼파라미터를 자동 최적화하며, 총 24회 시도(trial) 후 최적 모델을 선정했습니다.</p>
+                    <p><strong>Preprocessing Pipeline:</strong> 7단계 자동 전처리를 적용했습니다 — (1) DateTime 변환, (2) 이상치 IQR 클리핑, (3) 범주형 변수 라벨 인코딩, (4) 결측값 중앙값 대체, (5) 저분산(NZV) 컬럼 제거, (6) 층화 분할, (7) 스케일링. 전처리 파이프라인은 학습/추론 시 동일하게 적용됩니다.</p>
+                    <p><strong>Reproducibility:</strong> 모든 실험은 MLflow로 추적되며, 모델 바이너리, 전처리 파이프라인, 하이퍼파라미터가 아티팩트로 저장됩니다. 동일 데이터와 랜덤 시드(42)로 결과를 재현할 수 있습니다.</p>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 06 MODELING RESULTS
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-6">
+                <div class="section-header">
+                    <span class="section-number">06</span>
+                    <span class="section-title">Modeling Results</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="callout success">
+                    <div class="callout-title">AutoML Result</div>
+                    Best Model: <strong>LightGBM</strong> — 3분 42초, 24 trials evaluated
+                </div>
+
+                <!-- Model Comparison Bar Chart (CSS-only) -->
+                <div class="figure">
+                    <div class="figure-caption">Figure 1. Model Performance Comparison (R&sup2;)</div>
+                    <div class="figure-frame">
+                        <div class="model-compare">
+                            <div class="model-bar-row">
+                                <span class="model-bar-name champion-label">LightGBM</span>
+                                <div class="model-bar-track">
+                                    <div class="model-bar-fill rank-1" style="width: 94%"></div>
+                                </div>
+                                <span class="model-bar-score champion-score">0.94</span>
+                            </div>
+                            <div class="model-bar-row">
+                                <span class="model-bar-name">XGBoost</span>
+                                <div class="model-bar-track">
+                                    <div class="model-bar-fill rank-2" style="width: 92%"></div>
+                                </div>
+                                <span class="model-bar-score">0.92</span>
+                            </div>
+                            <div class="model-bar-row">
+                                <span class="model-bar-name">RandomForest</span>
+                                <div class="model-bar-track">
+                                    <div class="model-bar-fill rank-3" style="width: 88%"></div>
+                                </div>
+                                <span class="model-bar-score">0.88</span>
+                            </div>
+                            <div class="model-bar-row">
+                                <span class="model-bar-name">Linear Regression</span>
+                                <div class="model-bar-track">
+                                    <div class="model-bar-fill rank-4" style="width: 72%"></div>
+                                </div>
+                                <span class="model-bar-score">0.72</span>
+                            </div>
+                        </div>
+                        <div class="model-compare-caption">R&sup2; score (higher is better). LightGBM selected as champion model.</div>
+                    </div>
+                </div>
+
+                <!-- Detailed Metrics Table with right-align & conditional color -->
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th class="num">RMSE</th>
+                            <th class="num">MAE</th>
+                            <th class="num">R&sup2;</th>
+                            <th class="num">MAPE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Linear Regression</td>
+                            <td class="num">3.21</td>
+                            <td class="num">2.64</td>
+                            <td class="num">0.72</td>
+                            <td class="num" style="color: var(--danger)">12.3%</td>
+                        </tr>
+                        <tr>
+                            <td>RandomForest</td>
+                            <td class="num">1.85</td>
+                            <td class="num">1.34</td>
+                            <td class="num">0.88</td>
+                            <td class="num">7.2%</td>
+                        </tr>
+                        <tr>
+                            <td>XGBoost</td>
+                            <td class="num">1.32</td>
+                            <td class="num">0.95</td>
+                            <td class="num">0.92</td>
+                            <td class="num">5.4%</td>
+                        </tr>
+                        <tr class="champion">
+                            <td><span class="indicator blue"></span>LightGBM (Champion)</td>
+                            <td class="num">1.18</td>
+                            <td class="num">0.82</td>
+                            <td class="num">0.94</td>
+                            <td class="num" style="color: var(--success)">4.8%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 07 SHAP / FEATURE IMPORTANCE
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-7">
+                <div class="section-header">
+                    <span class="section-number">07</span>
+                    <span class="section-title">Feature Importance (SHAP)</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <!-- Pull Quote: Hero Stat -->
+                <div class="pull-quote">
+                    <div class="pull-quote-value">81.1%</div>
+                    <div class="pull-quote-text">CP 가격 + JKM 현물가 + 브렌트유 — 3개 변수가 전체 예측력의 81.1%를 차지</div>
+                    <div class="pull-quote-sub">나머지 6개 변수는 합산 18.9%의 보조적 기여</div>
+                </div>
+
+                <div class="figure">
+                    <div class="figure-caption">Figure 2. SHAP Feature Importance (Mean |SHAP Value|)</div>
+                    <div class="figure-frame">
+                        <div class="shap-chart">
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">cp_price</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-1" style="width: 100%"></div>
+                                </div>
+                                <span class="shap-bar-value">38.2%</span>
+                            </div>
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">jkm_price</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-2" style="width: 70.9%"></div>
+                                </div>
+                                <span class="shap-bar-value">27.1%</span>
+                            </div>
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">brent_crude</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-3" style="width: 41.4%"></div>
+                                </div>
+                                <span class="shap-bar-value">15.8%</span>
+                            </div>
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">heating_demand_idx</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-4" style="width: 24.3%"></div>
+                                </div>
+                                <span class="shap-bar-value">9.3%</span>
+                            </div>
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">usd_krw</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-5" style="width: 14.9%"></div>
+                                </div>
+                                <span class="shap-bar-value">5.7%</span>
+                            </div>
+                            <div class="shap-bar-row">
+                                <span class="shap-bar-label">season</span>
+                                <div class="shap-bar-track">
+                                    <div class="shap-bar-fill rank-6" style="width: 10.2%"></div>
+                                </div>
+                                <span class="shap-bar-value">3.9%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="figure-interp">
+                        각 변수가 모델 예측에 기여하는 평균 영향력(Mean |SHAP Value|)을 보여줍니다. 막대가 길수록 해당 변수가 예측에 더 큰 영향을 미칩니다.
+                        <br><strong>Top 3:</strong> cp_price (38.2%), jkm_price (27.1%), brent_crude (15.8%)
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 08 KEY INSIGHTS
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-8">
+                <div class="section-header">
+                    <span class="section-number">08</span>
+                    <span class="section-title">Key Insights</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="prose">
+                    <ol>
+                        <li><strong>CP + JKM + 유가 = 81.1%:</strong> 국제 에너지 가격 3개 변수가 LPG 판매 단가의 대부분을 설명합니다. 특히 사우디 아람코 CP가 단일 변수로 38.2%의 설명력을 보여 가장 지배적인 요인입니다.</li>
+                        <li><strong>환율 비선형 효과:</strong> 원/달러 환율이 1,450원 이상 구간에서 SHAP 기여도가 급격히 증가하는 임계효과가 관찰되었습니다. 환율 모니터링 경보를 1,450원 기준으로 설정할 것을 권장합니다.</li>
+                        <li><strong>계절성 13.2%:</strong> 난방 수요 지수(9.3%)와 계절 변수(3.9%)가 합산 13.2%의 기여도를 보이며, 동절기 가격 프리미엄이 통계적으로 유의합니다.</li>
+                        <li><strong>CP-JKM 스프레드:</strong> CP 가격과 JKM 가격의 차이(스프레드)가 확대될 때 예측 불확실성이 증가하는 패턴이 발견되었습니다.</li>
+                    </ol>
+                </div>
+
+                <!-- Pull Quote for business insight -->
+                <div class="pull-quote">
+                    <div class="pull-quote-value">~70%</div>
+                    <div class="pull-quote-text">수동 예측 대비 오차 절감 가능</div>
+                    <div class="pull-quote-sub">수동 예측 MAPE ~15% → 모델 예측 MAPE 4.8%</div>
+                </div>
+
+                <div class="prose">
+                    <p><strong>Business Insights:</strong></p>
+                    <ul>
+                        <li><strong>CP 계약 시점 최적화:</strong> CP 가격 하락 예측 시 선행 계약으로 연간 3~5% 원가 절감 가능</li>
+                        <li><strong>동절기 가격 프리미엄 대비:</strong> 10월 이전 재고 확보로 동절기 마진 방어</li>
+                        <li><strong>환율 헷지 임계점:</strong> 1,450원 이상 구간에서 원가 민감도 급증 → 선물환 헷지 권장</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 09 RECOMMENDATIONS
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-9">
+                <div class="section-header">
+                    <span class="section-number">09</span>
+                    <span class="section-title">Recommendations</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <div class="rec-card">
+                    <div class="rec-left">
+                        <span class="rec-priority high">HIGH</span>
+                        <span class="rec-number">01</span>
+                    </div>
+                    <div class="rec-body">
+                        <div class="rec-text">CP 가격 및 JKM 일일 모니터링 대시보드를 구축하고, 월별 모델 재학습 파이프라인을 자동화하여 예측 정확도를 유지하세요.</div>
+                        <div class="rec-impact">
+                            <span><span class="rec-impact-tag">Impact:</span> 연 3~5% 원가 절감</span>
+                            <span><span class="rec-impact-tag">Effort:</span> 2~3주 개발</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rec-card">
+                    <div class="rec-left">
+                        <span class="rec-priority high">HIGH</span>
+                        <span class="rec-number">02</span>
+                    </div>
+                    <div class="rec-body">
+                        <div class="rec-text">환율 1,450원 돌파 시 경보 체계를 연동하고, 해당 구간에서는 선물환 헷지 비중을 확대하세요.</div>
+                        <div class="rec-impact">
+                            <span><span class="rec-impact-tag">Impact:</span> 환율 리스크 50%+ 감소</span>
+                            <span><span class="rec-impact-tag">Effort:</span> 1주 설정</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rec-card">
+                    <div class="rec-left">
+                        <span class="rec-priority medium">MEDIUM</span>
+                        <span class="rec-number">03</span>
+                    </div>
+                    <div class="rec-body">
+                        <div class="rec-text">지정학적 이벤트(OPEC 회의, 중동 정세) 텍스트 데이터를 추가 변수로 활용하여 외부 충격에 대한 예측력을 보강하세요.</div>
+                        <div class="rec-impact">
+                            <span><span class="rec-impact-tag">Impact:</span> 예측 정확도 +5~10%p</span>
+                            <span><span class="rec-impact-tag">Effort:</span> 4~6주 R&D</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rec-card">
+                    <div class="rec-left">
+                        <span class="rec-priority medium">MEDIUM</span>
+                        <span class="rec-number">04</span>
+                    </div>
+                    <div class="rec-body">
+                        <div class="rec-text">기상청 예보 데이터를 연동하여 난방 수요 지수의 선행 예측 정확도를 향상시키세요.</div>
+                        <div class="rec-impact">
+                            <span><span class="rec-impact-tag">Impact:</span> 동절기 정확도 +8%p</span>
+                            <span><span class="rec-impact-tag">Effort:</span> 2~3주 연동</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rec-card">
+                    <div class="rec-left">
+                        <span class="rec-priority low">LOW</span>
+                        <span class="rec-number">05</span>
+                    </div>
+                    <div class="rec-body">
+                        <div class="rec-text">주간 데이터 확보 시 시계열 모델(Prophet, LSTM)과의 앙상블을 고려하여 장기 예측 안정성을 확보하세요.</div>
+                        <div class="rec-impact">
+                            <span><span class="rec-impact-tag">Impact:</span> 장기 예측 안정성 강화</span>
+                            <span><span class="rec-impact-tag">Effort:</span> 6~8주 실험</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════
+                 10 APPENDIX (COLLAPSIBLE)
+                 ═══════════════════════════════════════ -->
+            <div class="section" id="section-10">
+                <div class="section-header">
+                    <span class="section-number">10</span>
+                    <span class="section-title">Appendix</span>
+                </div>
+                <div class="section-divider"></div>
+
+                <details class="appendix-details" open>
+                    <summary>Research Comparison</summary>
+                    <div class="appendix-content">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Source</th><th>Details</th><th>Relevance</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>HuggingFace Papers</td>
+                                    <td>3 papers reviewed (LPG pricing, gradient boosting, JKM dynamics)</td>
+                                    <td><span class="indicator green"></span>High</td>
+                                </tr>
+                                <tr>
+                                    <td>Kaggle Solutions</td>
+                                    <td>LightGBM with lag features, XGBoost ensemble, LSTM hybrid</td>
+                                    <td><span class="indicator green"></span>High</td>
+                                </tr>
+                                <tr>
+                                    <td>Deep Research</td>
+                                    <td>CP-driven pricing mechanism, GB superiority over ARIMA</td>
+                                    <td><span class="indicator yellow"></span>Medium</td>
+                                </tr>
+                                <tr class="champion">
+                                    <td>Selected Model</td>
+                                    <td>LightGBM — aligns with top research & Kaggle results</td>
+                                    <td><span class="indicator blue"></span>Selected</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+
+                <details class="appendix-details">
+                    <summary>Model Hyperparameters</summary>
+                    <div class="appendix-content">
+                        <table class="dotted-table">
+                            <tr><td>n_estimators</td><td>312</td></tr>
+                            <tr><td>learning_rate</td><td>0.042</td></tr>
+                            <tr><td>max_depth</td><td>6</td></tr>
+                            <tr><td>num_leaves</td><td>31</td></tr>
+                            <tr><td>min_child_samples</td><td>12</td></tr>
+                            <tr><td>subsample</td><td>0.85</td></tr>
+                            <tr><td>colsample_bytree</td><td>0.78</td></tr>
+                            <tr><td>reg_alpha</td><td>0.1</td></tr>
+                            <tr><td>reg_lambda</td><td>0.5</td></tr>
+                            <tr><td>random_state</td><td>42</td></tr>
+                        </table>
+                    </div>
+                </details>
+
+                <details class="appendix-details">
+                    <summary>Artifacts & Reproducibility</summary>
+                    <div class="appendix-content">
+                        <div class="prose">
+                            <ul>
+                                <li>SHAP analysis plots (bar, summary, waterfall)</li>
+                                <li>Feature importance data (JSON)</li>
+                                <li>Model performance visualizations</li>
+                                <li>Trained model binary (LightGBM .pkl)</li>
+                                <li>Preprocessing pipeline (scikit-learn .pkl)</li>
+                                <li>MLflow experiment tracking (run ID linked)</li>
+                            </ul>
+                            <p><strong>Reproducibility:</strong> All analysis can be reproduced using the saved model and data artifacts. Random seed: 42. MLflow tracking URI: <code>file:./mlruns</code></p>
+                        </div>
+                    </div>
+                </details>
+
+                <details class="appendix-details">
+                    <summary>Glossary</summary>
+                    <div class="appendix-content">
+                        <table class="dotted-table">
+                            <tr><td>R&sup2;</td><td>결정계수. 모델이 데이터 변동의 몇 %를 설명하는지 (1에 가까울수록 좋음)</td></tr>
+                            <tr><td>RMSE</td><td>Root Mean Squared Error. 예측 오차의 표준편차 (낮을수록 좋음)</td></tr>
+                            <tr><td>MAE</td><td>Mean Absolute Error. 예측 오차의 평균 절대값 (낮을수록 좋음)</td></tr>
+                            <tr><td>MAPE</td><td>Mean Absolute Percentage Error. 예측 오차의 백분율 평균 (낮을수록 좋음)</td></tr>
+                            <tr><td>SHAP</td><td>SHapley Additive exPlanations. 게임 이론 기반 변수 기여도 분해 기법</td></tr>
+                            <tr><td>CP</td><td>Contract Price. 사우디 아람코가 매월 발표하는 LPG 수출 가격</td></tr>
+                            <tr><td>JKM</td><td>Japan Korea Marker. 아시아 LNG 현물 가격 벤치마크</td></tr>
+                        </table>
+                    </div>
+                </details>
+            </div>
+
+        </div>
+
+        <!-- ═══════════════════════════════════════
+             FOOTER
+             ═══════════════════════════════════════ -->
+        <div class="report-footer">
+            <div class="footer-left">
+                <span class="footer-brand">DA SYSTEM</span>
+                <span class="footer-divider"></span>
+                <span class="footer-disclaimer">This document is confidential and intended solely for the use of the individual or entity to whom it is addressed.</span>
+            </div>
+            <span>2026-02-12</span>
+        </div>
+    </div>
+</body>
+</html>

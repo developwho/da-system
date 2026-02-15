@@ -282,10 +282,11 @@ class OrchestratorAgent(BaseAgent):
                 normalized_result = normalize_research_results(result.data)
                 self.update_context("research_results", normalized_result)
             elif result_key == "modeling":
-                model_data = normalize_modeling_result(result.data)
+                serializable = normalize_modeling_result(result.data)
                 normalized_result = dict(result.data)
-                normalized_result["model_data"] = model_data
-                self.update_context("model_data", model_data)
+                normalized_result["model_data"] = serializable  # Redis 저장용 (직렬화 가능)
+                # In-memory context에는 원본 model_data (model, X_train 등 런타임 객체 포함) 저장
+                self.update_context("model_data", result.data.get("model_data", serializable))
             elif result_key == "insight":
                 normalized_result = normalize_insights_result(result.data)
                 self.update_context("insights", normalized_result)

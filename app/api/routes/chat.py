@@ -549,6 +549,11 @@ def _to_native_types(obj):
         return obj.tolist()
     if isinstance(obj, (np.str_,)):
         return str(obj)
+    from datetime import datetime, date
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
     return obj
 
 

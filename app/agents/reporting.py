@@ -501,23 +501,28 @@ class ReportingAgent(BaseAgent):
         )
 
     def _load_feature_importance(self) -> List[Dict]:
-        """feature_importance.json 로드"""
-        # Primary: insights directory
-        fi_path = os.path.join(
-            settings.OUTPUTS_DIR, "insights", self.context.session_id,
-            "feature_importance.json"
-        )
-        if not os.path.exists(fi_path):
-            # Fallback: analysis directory
-            fi_path = os.path.join(
-                settings.OUTPUTS_DIR, "analysis", self.context.session_id,
-                "feature_importance.json"
-            )
-        try:
-            with open(fi_path, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
+        """feature_importance.json 로드 — 3-stage fallback"""
+        sid = self.context.session_id
+        paths = [
+            os.path.join(settings.OUTPUTS_DIR, "models", sid, "feature_importance.json"),
+            os.path.join(settings.OUTPUTS_DIR, "insights", sid, "feature_importance.json"),
+            os.path.join(settings.OUTPUTS_DIR, "analysis", sid, "feature_importance.json"),
+        ]
+        for fi_path in paths:
+            if os.path.exists(fi_path):
+                try:
+                    with open(fi_path, encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    continue
+
+        # context.data fallback
+        model_data = self.context.data.get("model_data", {})
+        fi = model_data.get("feature_importance", [])
+        if fi:
+            return fi
+        insights = self.context.data.get("insights", {})
+        return insights.get("shap_summary", [])
 
     def _package_artifacts(self, report_data: Dict[str, Any]) -> str:
         """

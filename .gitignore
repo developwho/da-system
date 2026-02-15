@@ -97,8 +97,12 @@ test_result.txt
 test_titanic_output.txt
 phase4_test_log.txt
 
-# Claude Settings (local)
-.claude/settings.local.json
+# Claude Settings
+.claude/
 
 # Data metadata
 data/metadata/
+
+# Personal / Private
+other/
+온다빈_이력.md
